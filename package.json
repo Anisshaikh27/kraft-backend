@@ -1,0 +1,47 @@
+{
+  "name": "ai-code-builder-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "AI-powered React code builder backend with multiple FREE AI models",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "dev:both": "concurrently \"npm run dev\" \"cd ../frontend && npm start\"",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["ai", "react", "code-generator", "langchain"],
+  "author": "AI Code Builder Team",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.0.0",
+    "@langchain/core": "^0.1.20",
+    "@langchain/google-genai": "^0.0.8",
+    "@langchain/community": "^0.0.25",
+    "groq-sdk": "^0.3.1",
+    "@huggingface/inference": "^2.6.4",
+    "together-ai": "^0.2.7",
+    "@stackblitz/sdk": "^1.9.0",
+    "codesandbox-import-utils": "^2.2.3",
+    "jszip": "^3.10.1",
+    "archiver": "^6.0.1",
+    "sharp": "^0.32.6",
+    "cheerio": "^1.0.0-rc.12",
+    "minify": "^10.1.0",
+    "node-fetch": "^3.3.2",
+    "uuid": "^9.0.1",
+    "multer": "^1.4.5-lts.1",
+    "express-rate-limit": "^7.1.0",
+    "helmet": "^7.1.0",
+    "lz-string": "^1.5.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "concurrently": "^8.2.2"
+  }
+}
