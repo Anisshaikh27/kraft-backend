@@ -3,6 +3,8 @@ import express from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import { logger } from '../utils/logger.js';
 
+import enhancedAiService from '../services/enhancedAiService.js';
+
 const router = express.Router();
 
 // Get available FREE models
@@ -259,6 +261,75 @@ body {
         { name: 'gemini', displayName: 'Google Gemini 1.5 Flash' },
         { name: 'groq', displayName: 'Groq Llama 3.1 70B' }
       ]
+    });
+  }
+});
+
+router.post('/generate-component-enhanced', authMiddleware, async (req, res) => {
+  try {
+    const { description, requirements = '', model = 'gemini' } = req.body;
+
+    if (!description) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Component description is required' 
+      });
+    }
+
+    const result = await enhancedAiService.generateReactComponent(
+      description, 
+      requirements, 
+      model
+    );
+
+    res.json({
+      success: true,
+      component: result.component,
+      enhancement: 'structured-prompts',
+      availableModels: ['gemini']
+    });
+
+  } catch (error) {
+    logger.error('Enhanced component generation error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to generate enhanced component',
+      details: error.message
+    });
+  }
+});
+
+// ADD this new enhanced app endpoint
+router.post('/generate-app-enhanced', authMiddleware, async (req, res) => {
+  try {
+    const { description, features = [], model = 'gemini' } = req.body;
+
+    if (!description) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'App description is required' 
+      });
+    }
+
+    const result = await enhancedAiService.generateReactApp(
+      description, 
+      features, 
+      model
+    );
+
+    res.json({
+      success: true,
+      app: result.app,
+      enhancement: 'structured-prompts',
+      availableModels: ['gemini']
+    });
+
+  } catch (error) {
+    logger.error('Enhanced app generation error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to generate enhanced app',
+      details: error.message
     });
   }
 });
