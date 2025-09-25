@@ -1,3 +1,4 @@
+// models/User.js - Remove the duplicate index
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 
@@ -11,7 +12,7 @@ const userSchema = new mongoose.Schema({
   email: {
     type: String,
     required: [true, 'Email is required'],
-    unique: true,
+    unique: true, // This creates the index automatically
     lowercase: true,
     trim: true,
     match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
@@ -56,33 +57,17 @@ const userSchema = new mongoose.Schema({
       default: true
     }
   },
-  usage: {
-    generationsToday: {
-      type: Number,
-      default: 0
-    },
-    lastReset: {
-      type: Date,
-      default: Date.now
-    },
-    totalGenerations: {
-      type: Number,
-      default: 0
-    }
-  },
   isActive: {
     type: Boolean,
     default: true
   }
 }, {
-  timestamps: true,
-  toJSON: { virtuals: true },
-  toObject: { virtuals: true }
+  timestamps: true
 });
 
-// Index for performance
-userSchema.index({ email: 1 });
-userSchema.index({ provider: 1, providerId: 1 });
+// Remove these duplicate index lines - they're causing the warning
+// userSchema.index({ email: 1 }); // REMOVE THIS LINE
+// userSchema.index({ provider: 1, providerId: 1 }); // REMOVE THIS LINE
 
 // Pre-save hash password
 userSchema.pre('save', async function(next) {
@@ -101,17 +86,6 @@ userSchema.pre('save', async function(next) {
 userSchema.methods.comparePassword = async function(candidatePassword) {
   if (!this.password) return false;
   return bcrypt.compare(candidatePassword, this.password);
-};
-
-// Reset daily usage
-userSchema.methods.resetDailyUsage = function() {
-  const now = new Date();
-  const lastReset = new Date(this.usage.lastReset);
-  
-  if (now.getDate() !== lastReset.getDate()) {
-    this.usage.generationsToday = 0;
-    this.usage.lastReset = now;
-  }
 };
 
 export default mongoose.model('User', userSchema);
