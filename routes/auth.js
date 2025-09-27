@@ -1,220 +1,283 @@
+// routes/auth.js
 import express from 'express';
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { validateSignup, validateLogin } from '../middleware/validation.js';
 import { logger } from '../utils/logger.js';
 
 const router = express.Router();
 
-// Generate JWT Token
-const generateToken = (userId) => {
-  return jwt.sign(
-    { userId }, 
-    process.env.JWT_SECRET, 
-    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-  );
-};
-
-// User signup
-router.post('/signup', validateSignup, async (req, res) => {
+// routes/auth.js - Add debugging to signup route
+router.post('/signup', async (req, res) => {
   try {
-    const { name, email, password, provider = 'email' } = req.body;
+    const { name, email, password } = req.body;
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ 
+    console.log('🔍 Signup request received:', {
+      name: name,
+      email: email,
+      password: password ? '***' : 'MISSING',
+      hasName: !!name,
+      hasEmail: !!email,
+      hasPassword: !!password
+    });
+
+    // Validation
+    if (!name || !email || !password) {
+      return res.status(400).json({
         success: false,
-        error: 'User already exists with this email' 
+        error: 'Name, email, and password are required'
       });
     }
 
-    // Create new user
-    const user = new User({
-      name: name.trim(),
-      email: email.toLowerCase().trim(),
-      password: provider === 'email' ? password : undefined,
-      provider
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: 'Password must be at least 6 characters long'
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      console.log('❌ User already exists:', email);
+      return res.status(400).json({
+        success: false,
+        error: 'User already exists with this email'
+      });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+    
+    console.log('🔍 Password hashing result:', {
+      originalLength: password.length,
+      hashedLength: hashedPassword.length,
+      hashedPrefix: hashedPassword.substring(0, 7)
     });
 
-    await user.save();
-    logger.info(`New user created: ${user.email}`);
+    // Create new user
+    const userData = {
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      password: hashedPassword,
+      avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=00b4d8&color=ffffff`,
+      isOAuthUser: false // Explicitly set this
+    };
 
-    // Generate token
-    const token = generateToken(user._id);
+    console.log('🔍 Creating user with data:', {
+      name: userData.name,
+      email: userData.email,
+      hasPassword: !!userData.password,
+      passwordLength: userData.password ? userData.password.length : 0,
+      isOAuthUser: userData.isOAuthUser
+    });
+
+    const user = new User(userData);
+    await user.save();
+
+    console.log('🔍 User saved successfully:', {
+      id: user._id,
+      email: user.email,
+      hasPassword: !!user.password,
+      passwordInDB: user.password ? user.password.substring(0, 7) + '...' : 'MISSING'
+    });
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    );
+
+    logger.info(`New user created: ${email}`);
 
     res.status(201).json({
       success: true,
       message: 'User created successfully',
+      token,
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
-        provider: user.provider,
         avatar: user.avatar,
-        preferences: user.preferences
-      },
-      token
+        createdAt: user.createdAt
+      }
     });
 
   } catch (error) {
+    console.error('❌ Signup error:', error);
     logger.error('Signup error:', error);
-    
-    if (error.name === 'ValidationError') {
-      const errors = Object.values(error.errors).map(err => err.message);
-      return res.status(400).json({ 
-        success: false,
-        error: 'Validation failed',
-        details: errors
-      });
-    }
-    
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: 'Failed to create user' 
+      error: 'Failed to create user'
     });
   }
 });
 
-// User login
-router.post('/login', validateLogin, async (req, res) => {
+
+
+// routes/auth.js - Add debugging to login route
+router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-
-    // Find user and include password for comparison
-    const user = await User.findOne({ email: email.toLowerCase().trim() })
-      .select('+password');
-      
-    if (!user) {
-      return res.status(401).json({ 
+    
+    // DEBUG: Log what we received (don't log passwords in production!)
+    console.log('🔍 Backend received login request:', {
+      email: email,
+      password: password ? '***' : 'MISSING',
+      hasEmail: !!email,
+      hasPassword: !!password
+    });
+    
+    if (!email || !password) {
+      console.log('❌ Missing email or password');
+      return res.status(400).json({
         success: false,
-        error: 'Invalid email or password' 
+        error: 'Email and password are required'
       });
     }
 
-    // Check if account is active
-    if (!user.isActive) {
-      return res.status(401).json({ 
+    // Always lower-case for lookup
+    const user = await User.findOne({ email: email.toLowerCase() });
+    
+    console.log('🔍 Database lookup result:', {
+      userFound: !!user,
+      hasPassword: user && !!user.password,
+      isOAuthUser: user && user.isOAuthUser
+    });
+
+    // User not found or missing password (i.e. OAuth user, corrupt data, etc)
+    if (!user || typeof user.password !== 'string' || !user.password) {
+      console.log('❌ User not found or no password');
+      return res.status(401).json({
         success: false,
-        error: 'Account is deactivated' 
+        error: 'Invalid email or password'
       });
     }
 
-    // Check password
-    const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-      return res.status(401).json({ 
+    // bcrypt.compare returns false if not a valid bcrypt hash!
+    const isValidPassword = await bcrypt.compare(password, user.password);
+    
+    console.log('🔍 Password comparison result:', {
+      isValid: isValidPassword,
+      passwordType: typeof user.password,
+      passwordStartsWith: user.password.substring(0, 7) // Show hash prefix
+    });
+    
+    if (!isValidPassword) {
+      console.log('❌ Invalid password');
+      return res.status(401).json({
         success: false,
-        error: 'Invalid email or password' 
+        error: 'Invalid email or password'
       });
     }
 
-    // Reset daily usage if needed
-    user.resetDailyUsage();
+    // Success: Generate JWT Token
+    const token = jwt.sign(
+      { userId: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    );
+
+    // Optionally update lastLogin
+    user.lastLogin = new Date();
     await user.save();
 
-    logger.info(`User logged in: ${user.email}`);
-
-    // Generate token
-    const token = generateToken(user._id);
+    console.log('✅ Login successful for:', email);
 
     res.json({
       success: true,
       message: 'Login successful',
+      token,
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
-        provider: user.provider,
         avatar: user.avatar,
-        preferences: user.preferences,
-        usage: user.usage
-      },
-      token
+        lastLogin: user.lastLogin,
+        createdAt: user.createdAt
+      }
     });
-
   } catch (error) {
     logger.error('Login error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: 'Login failed' 
+      error: 'Failed to login'
     });
   }
 });
 
-// OAuth Login (Google/GitHub simulation)
+// OAuth login endpoint
 router.post('/oauth', async (req, res) => {
   try {
-    const { name, email, provider, providerId, avatar } = req.body;
+    const { provider, name, email, avatar } = req.body;
 
-    if (!name || !email || !provider) {
+    if (!provider || !email) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required OAuth data'
+        error: 'Provider and email are required'
       });
     }
 
-    // Find or create user
-    let user = await User.findOne({ 
-      $or: [
-        { email: email.toLowerCase().trim() },
-        { provider, providerId }
-      ]
-    });
+    // Check if user exists
+    let user = await User.findOne({ email: email.toLowerCase() });
 
-    if (!user) {
-      user = new User({
-        name: name.trim(),
-        email: email.toLowerCase().trim(),
-        provider,
-        providerId,
-        avatar: avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=00b4d8&color=ffffff`
-      });
+    if (user) {
+      // Update existing user
+      user.lastLogin = new Date();
+      if (avatar) user.avatar = avatar;
       await user.save();
-      logger.info(`New OAuth user created: ${user.email} (${provider})`);
     } else {
-      // Update user info if needed
-      user.name = name.trim();
-      user.avatar = avatar || user.avatar;
-      user.resetDailyUsage();
+      // Create new user
+      user = new User({
+        name: name || 'OAuth User',
+        email: email.toLowerCase().trim(),
+        password: await bcrypt.hash(Math.random().toString(36), 10), // Random password for OAuth users
+        avatar: avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'User')}&background=00b4d8&color=ffffff`,
+        oauthProvider: provider,
+        isOAuthUser: true
+      });
+
       await user.save();
-      logger.info(`OAuth user logged in: ${user.email} (${provider})`);
+      logger.info(`New OAuth user created: ${email} (${provider})`);
     }
 
-    // Generate token
-    const token = generateToken(user._id);
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    );
 
     res.json({
       success: true,
       message: 'OAuth login successful',
+      token,
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
-        provider: user.provider,
         avatar: user.avatar,
-        preferences: user.preferences,
-        usage: user.usage
-      },
-      token
+        provider: user.oauthProvider,
+        lastLogin: user.lastLogin,
+        createdAt: user.createdAt
+      }
     });
 
   } catch (error) {
-    logger.error('OAuth error:', error);
-    res.status(500).json({ 
+    logger.error('OAuth login error:', error);
+    res.status(500).json({
       success: false,
-      error: 'OAuth login failed' 
+      error: 'Failed to complete OAuth login'
     });
   }
 });
 
-// Get current user
+// Get current user - FIXED VERSION
 router.get('/me', authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.userId)
-      .select('-password')
-      .populate('projects', 'name description createdAt');
+    const user = await User.findById(req.userId).select('-password');
 
     if (!user) {
       return res.status(404).json({ 
@@ -223,12 +286,16 @@ router.get('/me', authMiddleware, async (req, res) => {
       });
     }
 
-    user.resetDailyUsage();
-    await user.save();
-
     res.json({ 
       success: true,
-      user 
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar,
+        lastLogin: user.lastLogin,
+        createdAt: user.createdAt
+      }
     });
     
   } catch (error) {
@@ -240,64 +307,22 @@ router.get('/me', authMiddleware, async (req, res) => {
   }
 });
 
-// Update user profile
-router.put('/profile', authMiddleware, async (req, res) => {
-  try {
-    const { name, preferences } = req.body;
-    const updates = {};
-
-    if (name && name.trim()) {
-      updates.name = name.trim();
-    }
-
-    if (preferences) {
-      updates.preferences = { ...updates.preferences, ...preferences };
-    }
-
-    const user = await User.findByIdAndUpdate(
-      req.userId,
-      updates,
-      { new: true, runValidators: true }
-    ).select('-password');
-
-    if (!user) {
-      return res.status(404).json({ 
-        success: false,
-        error: 'User not found' 
-      });
-    }
-
-    logger.info(`User profile updated: ${user.email}`);
-
-    res.json({
-      success: true,
-      message: 'Profile updated successfully',
-      user
-    });
-
-  } catch (error) {
-    logger.error('Profile update error:', error);
-    res.status(500).json({ 
-      success: false,
-      error: 'Failed to update profile' 
-    });
-  }
-});
-
-// Logout (client-side token removal, server logs it)
+// Logout endpoint
 router.post('/logout', authMiddleware, async (req, res) => {
   try {
-    logger.info(`User logged out: ${req.userId}`);
+    // In a production app, you might want to blacklist the token
+    // For now, we'll just return success (client will remove token)
     
     res.json({
       success: true,
       message: 'Logged out successfully'
     });
+
   } catch (error) {
     logger.error('Logout error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: 'Logout failed' 
+      error: 'Failed to logout'
     });
   }
 });

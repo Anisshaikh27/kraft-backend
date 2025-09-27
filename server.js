@@ -1,6 +1,16 @@
+// server.js - Move dotenv to the VERY TOP
+import dotenv from 'dotenv';
+dotenv.config(); // Load environment variables FIRST
+
+// Add debug logging right here
+console.log('🔍 Environment Debug (server.js):');
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('GOOGLE_API_KEY present:', !!process.env.GOOGLE_API_KEY);
+console.log('GROQ_API_KEY present:', !!process.env.GROQ_API_KEY);
+
+// Now import everything else
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -12,6 +22,9 @@ import aiRoutes from './routes/ai.js';
 import templateRoutes from './routes/templates.js';
 import exportRoutes from './routes/export.js';
 import fileRoutes from './routes/files.js';
+
+// Rest of your server code...
+
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler.js';
