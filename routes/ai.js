@@ -1,313 +1,341 @@
-// routes/ai.js
-import express from 'express';
-import { authMiddleware } from '../middleware/auth.js';
-import { logger } from '../utils/logger.js';
-import freeAiService from '../services/freeAiService.js'; // This should now work
+const express = require('express');
+const { body, validationResult } = require('express-validator');
+const AIController = require('../controllers/aiController');
+const { asyncHandler, ValidationError } = require('../middleware/errorHandler');
 
 const router = express.Router();
+const aiController = new AIController();
 
-// Get available FREE models
-router.get('/free-models', (req, res) => {
-  try {
-    const models = freeAiService.getAvailableModels();
-
-    res.json({
-      success: true,
-      models,
-      healthCheck: {
-        gemini: !!process.env.GOOGLE_API_KEY,
-        groq: !!process.env.GROQ_API_KEY,
-        totalAvailable: models.length,
-        timestamp: new Date().toISOString()
-      }
-    });
-  } catch (error) {
-    logger.error('Get models error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get models'
-    });
+// Validation middleware
+const validateRequest = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    throw new ValidationError('Validation failed', errors.array());
   }
-});
+  next();
+};
 
-// Generate React Component 
-router.post('/generate-component-free', authMiddleware, async (req, res) => {
-  try {
-    const { description, requirements = '', model = 'gemini' } = req.body;
+// POST /api/ai/generate - Generate code from natural language prompt
+router.post('/generate',
+  // Validation rules
+  [
+    body('prompt')
+      .notEmpty()
+      .withMessage('Prompt is required')
+      .isLength({ min: 10, max: 5000 })
+      .withMessage('Prompt must be between 10 and 5000 characters'),
+    
+    body('type')
+      .optional()
+      .isIn(['general', 'react', 'component', 'hook', 'context', 'tailwind', 'fullstack', 'debug', 'optimize', 'init'])
+      .withMessage('Invalid generation type'),
+    
+    body('provider')
+      .optional()
+      .isIn(['groq', 'gemini'])
+      .withMessage('Invalid AI provider'),
+    
+    body('context')
+      .optional()
+      .isObject()
+      .withMessage('Context must be an object')
+  ],
+  validateRequest,
+  asyncHandler(async (req, res) => {
+    await aiController.generateCode(req, res);
+  })
+);
 
-    if (!description) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Component description is required' 
-      });
+// POST /api/ai/chat - Chat with AI for interactive development
+router.post('/chat',
+  [
+    body('messages')
+      .isArray({ min: 1 })
+      .withMessage('Messages array is required'),
+    
+    body('messages.*.role')
+      .isIn(['system', 'user', 'assistant'])
+      .withMessage('Invalid message role'),
+    
+    body('messages.*.content')
+      .notEmpty()
+      .withMessage('Message content is required'),
+    
+    body('provider')
+      .optional()
+      .isIn(['groq', 'gemini'])
+      .withMessage('Invalid AI provider')
+  ],
+  validateRequest,
+  asyncHandler(async (req, res) => {
+    await aiController.chatWithAI(req, res);
+  })
+);
+
+// GET /api/ai/models - Get available AI models
+router.get('/models',
+  asyncHandler(async (req, res) => {
+    await aiController.getAvailableModels(req, res);
+  })
+);
+
+// GET /api/ai/health - Health check for AI services
+router.get('/health',
+  asyncHandler(async (req, res) => {
+    await aiController.healthCheck(req, res);
+  })
+);
+
+// POST /api/ai/complete - Code completion endpoint
+router.post('/complete',
+  [
+    body('code')
+      .notEmpty()
+      .withMessage('Code context is required'),
+    
+    body('language')
+      .optional()
+      .isIn(['javascript', 'typescript', 'jsx', 'tsx', 'html', 'css', 'json'])
+      .withMessage('Invalid language'),
+    
+    body('cursorPosition')
+      .optional()
+      .isNumeric()
+      .withMessage('Cursor position must be a number')
+  ],
+  validateRequest,
+  asyncHandler(async (req, res) => {
+    const { code, language = 'javascript', cursorPosition = code.length, provider = null } = req.body;
+
+    const systemPrompt = `You are an expert code completion assistant. Provide intelligent code suggestions based on the context. Return only the completion, no explanations.
+
+Language: ${language}
+Context: Code completion`;
+
+    const userPrompt = `Complete this ${language} code:
+\`\`\`${language}
+${code}
+\`\`\`
+Cursor position: ${cursorPosition}`;
+
+    // Use the generateCode method with specific context
+    req.body = {
+      prompt: userPrompt,
+      type: 'general',
+      context: { language, cursorPosition },
+      provider
+    };
+
+    await aiController.generateCode(req, res);
+  })
+);
+
+// POST /api/ai/explain - Explain code functionality
+router.post('/explain',
+  [
+    body('code')
+      .notEmpty()
+      .withMessage('Code is required'),
+    
+    body('language')
+      .optional()
+      .isIn(['javascript', 'typescript', 'jsx', 'tsx', 'html', 'css', 'python', 'sql'])
+      .withMessage('Invalid language')
+  ],
+  validateRequest,
+  asyncHandler(async (req, res) => {
+    const { code, language = 'javascript' } = req.body;
+
+    const systemPrompt = 'You are an expert code explainer. Analyze the provided code and explain what it does, how it works, and any notable patterns or techniques used.';
+    
+    const userPrompt = `Explain this ${language} code:
+\`\`\`${language}
+${code}
+\`\`\``;
+
+    req.body = {
+      prompt: userPrompt,
+      type: 'general',
+      context: { language, operation: 'explain' }
+    };
+
+    await aiController.generateCode(req, res);
+  })
+);
+
+// POST /api/ai/review - Code review and suggestions
+router.post('/review',
+  [
+    body('code')
+      .notEmpty()
+      .withMessage('Code is required'),
+    
+    body('language')
+      .optional()
+      .isIn(['javascript', 'typescript', 'jsx', 'tsx', 'html', 'css', 'python', 'sql'])
+      .withMessage('Invalid language'),
+    
+    body('focus')
+      .optional()
+      .isArray()
+      .withMessage('Focus areas must be an array')
+  ],
+  validateRequest,
+  asyncHandler(async (req, res) => {
+    const { code, language = 'javascript', focus = [] } = req.body;
+
+    let focusAreas = 'Code quality, best practices, potential bugs, performance, and security';
+    if (focus.length > 0) {
+      focusAreas = focus.join(', ');
     }
 
-    const result = await freeAiService.generateReactComponent(
-      description, 
-      requirements, 
-      model
-    );
+    const systemPrompt = `You are an expert code reviewer. Review the provided code focusing on: ${focusAreas}. Provide constructive feedback and improvement suggestions.`;
+    
+    const userPrompt = `Review this ${language} code:
+\`\`\`${language}
+${code}
+\`\`\`
 
-    res.json({
-      success: true,
-      component: result,
-      availableModels: ['gemini', 'groq']
-    });
+Focus on: ${focusAreas}`;
 
-  } catch (error) {
-    logger.error('Component generation error:', error);
-    res.status(500).json({ 
-      success: false,
-      error: 'Failed to generate component',
-      details: error.message
-    });
-  }
-});
+    req.body = {
+      prompt: userPrompt,
+      type: 'debug',
+      context: { language, operation: 'review', focus }
+    };
 
-// Generate Complete React App - WORKING VERSION
-router.post('/generate-app-free', authMiddleware, async (req, res) => {
-  try {
-    const { description, features = [], model = 'gemini' } = req.body;
+    await aiController.generateCode(req, res);
+  })
+);
 
-    if (!description) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'App description is required' 
-      });
+// POST /api/ai/optimize - Code optimization suggestions
+router.post('/optimize',
+  [
+    body('code')
+      .notEmpty()
+      .withMessage('Code is required'),
+    
+    body('language')
+      .optional()
+      .isIn(['javascript', 'typescript', 'jsx', 'tsx'])
+      .withMessage('Invalid language'),
+    
+    body('target')
+      .optional()
+      .isIn(['performance', 'bundle-size', 'readability', 'accessibility', 'seo'])
+      .withMessage('Invalid optimization target')
+  ],
+  validateRequest,
+  asyncHandler(async (req, res) => {
+    const { code, language = 'javascript', target = 'performance' } = req.body;
+
+    const systemPrompt = `You are a code optimization expert. Analyze the code and provide optimized version focusing on ${target}. Explain the improvements made.`;
+    
+    const userPrompt = `Optimize this ${language} code for ${target}:
+\`\`\`${language}
+${code}
+\`\`\``;
+
+    req.body = {
+      prompt: userPrompt,
+      type: 'optimize',
+      context: { language, optimization: target }
+    };
+
+    await aiController.generateCode(req, res);
+  })
+);
+
+// POST /api/ai/debug - Debug code issues
+router.post('/debug',
+  [
+    body('code')
+      .notEmpty()
+      .withMessage('Code is required'),
+    
+    body('error')
+      .optional()
+      .isString()
+      .withMessage('Error message must be a string'),
+    
+    body('language')
+      .optional()
+      .isIn(['javascript', 'typescript', 'jsx', 'tsx'])
+      .withMessage('Invalid language')
+  ],
+  validateRequest,
+  asyncHandler(async (req, res) => {
+    const { code, error, language = 'javascript' } = req.body;
+
+    let prompt = `Debug this ${language} code`;
+    if (error) {
+      prompt += ` that's producing the error: "${error}"`;
     }
 
-    logger.info(`Generating app: ${description} with model: ${model}`);
+    prompt += `:
+\`\`\`${language}
+${code}
+\`\`\`
 
-    try {
-      // Use the freeAiService to generate the app
-      const result = await freeAiService.generateReactApp(description, features, model);
+Please identify the issue, explain what's wrong, and provide the corrected code.`;
 
-      if (result.success) {
-        // Ensure we return the proper structure
-        const appData = result.app || {};
-        
-        // If the AI didn't return proper files, create default ones
-        const files = appData.files || [
-          {
-            name: 'App.js',
-            path: 'src/App.js',
-            content: generateEnhancedApp(description, features)
-          },
-          {
-            name: 'package.json',
-            path: 'package.json',
-            content: JSON.stringify({
-              "name": description.toLowerCase().replace(/\s+/g, '-'),
-              "version": "1.0.0",
-              "private": true,
-              "dependencies": {
-                "react": "^18.2.0",
-                "react-dom": "^18.2.0",
-                "react-scripts": "5.0.1"
-              },
-              "scripts": {
-                "start": "react-scripts start",
-                "build": "react-scripts build"
-              }
-            }, null, 2)
-          },
-          {
-            name: 'index.html',
-            path: 'public/index.html',
-            content: `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${description}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body>
-  <div id="root"></div>
-</body>
-</html>`
-          }
-        ];
+    req.body = {
+      prompt: prompt,
+      type: 'debug',
+      context: { language, error, operation: 'debug' }
+    };
 
-        res.json({
-          success: true,
-          project: {
-            _id: 'generated-' + Date.now(),
-            name: description,
-            description: description,
-            files: files,
-            buildStatus: 'success',
-            generatedWith: model
-          },
-          app: {
-            success: true,
-            files: files,
-            model: model
-          },
-          preview: {
-            success: true,
-            ready: true
-          }
-        });
-      } else {
-        throw new Error(result.error || 'AI generation failed');
-      }
-    } catch (aiError) {
-      logger.warn('AI generation failed, using fallback:', aiError.message);
-      
-      // Fallback with static content
-      const fallbackFiles = [
-        {
-          name: 'App.js',
-          path: 'src/App.js',
-          content: generateEnhancedApp(description, features)
-        },
-        {
-          name: 'package.json',
-          path: 'package.json',
-          content: JSON.stringify({
-            "name": description.toLowerCase().replace(/\s+/g, '-'),
-            "version": "1.0.0",
-            "private": true,
-            "dependencies": {
-              "react": "^18.2.0",
-              "react-dom": "^18.2.0",
-              "react-scripts": "5.0.1"
-            },
-            "scripts": {
-              "start": "react-scripts start",
-              "build": "react-scripts build"
-            }
-          }, null, 2)
-        }
-      ];
+    await aiController.generateCode(req, res);
+  })
+);
 
-      res.json({
-        success: true,
-        project: {
-          _id: 'fallback-' + Date.now(),
-          name: description,
-          description: description + ' (Fallback)',
-          files: fallbackFiles,
-          buildStatus: 'success',
-          generatedWith: 'fallback'
-        },
-        app: {
-          success: true,
-          files: fallbackFiles,
-          model: 'fallback'
-        },
-        note: 'Generated with fallback template due to AI service issue'
-      });
-    }
+// POST /api/ai/template - Generate project templates
+router.post('/template',
+  [
+    body('projectType')
+      .notEmpty()
+      .isIn(['react-app', 'react-component-library', 'next-app', 'express-api', 'fullstack-app'])
+      .withMessage('Invalid project type'),
+    
+    body('features')
+      .optional()
+      .isArray()
+      .withMessage('Features must be an array'),
+    
+    body('name')
+      .optional()
+      .isString()
+      .isLength({ min: 1, max: 50 })
+      .withMessage('Project name must be between 1 and 50 characters')
+  ],
+  validateRequest,
+  asyncHandler(async (req, res) => {
+    const { projectType, features = [], name = 'my-project' } = req.body;
 
-  } catch (error) {
-    logger.error('App generation error:', error);
-    res.status(500).json({ 
-      success: false,
-      error: 'Failed to generate app',
-      details: error.message
-    });
-  }
+    const prompt = `Create a ${projectType} project template named "${name}"${features.length > 0 ? ` with features: ${features.join(', ')}` : ''}. 
+
+Include:
+- Complete project structure
+- Package.json with all dependencies
+- Configuration files
+- Basic components and routing setup
+- README with setup instructions
+- Best practices implementation`;
+
+    req.body = {
+      prompt: prompt,
+      type: 'init',
+      context: { projectType, features, name }
+    };
+
+    await aiController.generateCode(req, res);
+  })
+);
+
+// Error handling for this router
+router.use((error, req, res, next) => {
+  console.error('AI Router Error:', error);
+  next(error);
 });
 
-// Helper function to generate enhanced React app
-function generateEnhancedApp(description, features) {
-  return `import React, { useState } from 'react';
-
-function App() {
-  const [count, setCount] = useState(0);
-  const [isVisible, setIsVisible] = useState(true);
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      <div className="container mx-auto px-4 py-8">
-        <header className="text-center mb-12">
-          <h1 className="text-4xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600 mb-4">
-            ${description}
-          </h1>
-          <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-            Generated with Kraft AI Code Builder
-          </p>
-        </header>
-
-        {isVisible && (
-          <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-8">
-            <span className="block sm:inline">🎉 Your AI-generated app is ready! You can modify this via chat.</span>
-            <button 
-              onClick={() => setIsVisible(false)}
-              className="float-right text-green-500 hover:text-green-700"
-            >
-              ×
-            </button>
-          </div>
-        )}
-
-        <main className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 mb-12">
-          <div className="bg-white rounded-2xl shadow-xl p-6 border border-gray-100 hover:shadow-2xl transition-shadow">
-            <div className="text-3xl mb-4">🚀</div>
-            <h3 className="text-xl font-semibold text-gray-800 mb-2">Modern React</h3>
-            <p className="text-gray-600">Built with React 18+ and modern patterns</p>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-xl p-6 border border-gray-100 hover:shadow-2xl transition-shadow">
-            <div className="text-3xl mb-4">🎨</div>
-            <h3 className="text-xl font-semibold text-gray-800 mb-2">Beautiful UI</h3>
-            <p className="text-gray-600">Styled with Tailwind CSS and responsive design</p>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-xl p-6 border border-gray-100 hover:shadow-2xl transition-shadow">
-            <div className="text-3xl mb-4">⚡</div>
-            <h3 className="text-xl font-semibold text-gray-800 mb-2">Interactive</h3>
-            <p className="text-gray-600">Working components with state management</p>
-          </div>
-        </main>
-
-        <section className="bg-white rounded-2xl shadow-xl p-8 mb-12">
-          <h2 className="text-3xl font-bold text-center text-gray-800 mb-8">Interactive Demo</h2>
-          <div className="flex flex-col items-center space-y-6">
-            <div className="text-6xl font-bold text-blue-600">
-              {count}
-            </div>
-            <div className="flex gap-4">
-              <button
-                onClick={() => setCount(count - 1)}
-                className="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg transition-all duration-200 transform hover:scale-105"
-              >
-                ➖ Decrease
-              </button>
-              <button
-                onClick={() => setCount(0)}
-                className="bg-gray-500 hover:bg-gray-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg transition-all duration-200 transform hover:scale-105"
-              >
-                🔄 Reset
-              </button>
-              <button
-                onClick={() => setCount(count + 1)}
-                className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg transition-all duration-200 transform hover:scale-105"
-              >
-                ➕ Increase
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <section className="text-center">
-          <h2 className="text-2xl font-semibold text-gray-800 mb-6">Features</h2>
-          <div className="flex flex-wrap justify-center gap-3">
-            ${features.map(feature => `
-              <span className="bg-blue-100 text-blue-800 px-4 py-2 rounded-full text-sm font-medium">
-                ${feature}
-              </span>
-            `).join('')}
-          </div>
-        </section>
-      </div>
-    </div>
-  );
-}
-
-export default App;`;
-}
-
-export default router;
+module.exports = router;

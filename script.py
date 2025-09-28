@@ -1,0 +1,52 @@
+# Let's create the package.json file for the backend
+package_json = {
+    "name": "weblify-ai-backend",
+    "version": "1.0.0",
+    "description": "Backend for Weblify.AI clone - AI-powered web application generator",
+    "main": "server.js",
+    "scripts": {
+        "start": "node server.js",
+        "dev": "nodemon server.js",
+        "test": "jest"
+    },
+    "keywords": [
+        "ai",
+        "code-generation",
+        "web-development",
+        "react",
+        "nodejs",
+        "express"
+    ],
+    "author": "Your Name",
+    "license": "MIT",
+    "dependencies": {
+        "express": "^4.18.2",
+        "cors": "^2.8.5",
+        "helmet": "^7.1.0",
+        "morgan": "^1.10.0",
+        "dotenv": "^16.3.1",
+        "express-rate-limit": "^7.1.5",
+        "groq-sdk": "^0.5.0",
+        "@google/generative-ai": "^0.15.0",
+        "axios": "^1.6.0",
+        "uuid": "^9.0.1",
+        "joi": "^17.11.0",
+        "multer": "^1.4.5-lts.1",
+        "compression": "^1.7.4",
+        "express-validator": "^7.0.1"
+    },
+    "devDependencies": {
+        "nodemon": "^3.0.2",
+        "jest": "^29.7.0",
+        "supertest": "^6.3.3"
+    },
+    "engines": {
+        "node": ">=18.0.0",
+        "npm": ">=8.0.0"
+    }
+}
+
+print("BACKEND PACKAGE.JSON")
+print("=" * 50)
+import json
+print(json.dumps(package_json, indent=2))

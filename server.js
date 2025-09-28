@@ -1,139 +1,153 @@
-// server.js - Move dotenv to the VERY TOP
-import dotenv from 'dotenv';
-dotenv.config(); // Load environment variables FIRST
-
-// Add debug logging right here
-console.log('🔍 Environment Debug (server.js):');
-console.log('NODE_ENV:', process.env.NODE_ENV);
-console.log('GOOGLE_API_KEY present:', !!process.env.GOOGLE_API_KEY);
-console.log('GROQ_API_KEY present:', !!process.env.GROQ_API_KEY);
-
-// Now import everything else
-import express from 'express';
-import cors from 'cors';
-import mongoose from 'mongoose';
-import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
-
-// Import routes
-import authRoutes from './routes/auth.js';
-import projectRoutes from './routes/projects.js';
-import aiRoutes from './routes/ai.js';
-import templateRoutes from './routes/templates.js';
-import exportRoutes from './routes/export.js';
-import fileRoutes from './routes/files.js';
-
-// Rest of your server code...
-
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const morgan = require('morgan');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
+require('dotenv').config();
 
 // Import middleware
-import { errorHandler } from './middleware/errorHandler.js';
-import { logger } from './utils/logger.js';
+// ✅ RIGHT – pulls out the middleware you need
+const { errorHandler, notFoundHandler, requestLogger } =
+  require('./middleware/errorHandler');
 
-dotenv.config();
 
+// Import routes
+const aiRoutes = require('./routes/ai');
+const projectRoutes = require('./routes/projects');
+const fileRoutes = require('./routes/files');
+
+// Initialize Express app
 const app = express();
-const PORT = process.env.PORT || 5000;
+
+// Trust proxy for accurate IP addresses behind load balancers
+app.set('trust proxy', 1);
 
 // Security middleware
 app.use(helmet({
-  crossOriginEmbedderPolicy: false,
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.tailwindcss.com"],
       styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
       imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'", "https://api.openai.com", "https://console.groq.com"]
-    }
-  }
+    },
+  },
 }));
+
+// CORS configuration
+const corsOptions = {
+  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  credentials: true,
+  optionsSuccessStatus: 200,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-session-id']
+};
+
+app.use(cors(corsOptions));
+
+// Compression middleware
+app.use(compression());
+
+// Logging middleware
+if (process.env.NODE_ENV !== 'test') {
+  app.use(morgan('combined'));
+}
+
+// Body parsing middleware
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX) || 100,
-  message: 'Too many requests from this IP, please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60000, // 1 minute
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 30, // limit each IP to 30 requests per windowMs
+  message: {
+    error: 'Too many requests from this IP, please try again later.',
+    retryAfter: 60
+  },
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
 });
-app.use(limiter);
 
-// CORS configuration
-app.use(cors({
-  origin: process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : ['http://localhost:3000'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
-// Body parsing middleware
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-
-// Logging middleware
-app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.path} - ${req.ip}`);
-  next();
-});
+app.use('/api', limiter);
 
 // Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'OK',
-    message: 'AI Code Builder Backend is running!',
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'healthy',
     timestamp: new Date().toISOString(),
-    version: '1.0.0'
+    environment: process.env.NODE_ENV,
+    uptime: process.uptime()
   });
 });
 
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/projects', projectRoutes);
+// API routes
 app.use('/api/ai', aiRoutes);
-app.use('/api/templates', templateRoutes);
-app.use('/api/export', exportRoutes);
+app.use('/api/projects', projectRoutes);
 app.use('/api/files', fileRoutes);
 
-// Error handling middleware
-app.use(errorHandler);
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Weblify.AI Backend API',
+    version: '1.0.0',
+    documentation: '/api/docs',
+    health: '/health'
+  });
+});
 
 // 404 handler
 app.use('*', (req, res) => {
-  res.status(404).json({ 
-    error: 'Route not found',
-    path: req.originalUrl,
-    method: req.method
+  res.status(404).json({
+    error: 'Endpoint not found',
+    message: `Cannot ${req.method} ${req.originalUrl}`,
+    timestamp: new Date().toISOString()
   });
 });
 
-// MongoDB connection
-mongoose.connect(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-.then(() => {
-  logger.info('✅ Connected to MongoDB');
-  
-  // Start server
-  app.listen(PORT, () => {
-    logger.info(`🚀 Server running on http://localhost:${PORT}`);
-    logger.info(`📱 Frontend URL: ${process.env.FRONTEND_URL}`);
-    logger.info(`🌍 Environment: ${process.env.NODE_ENV}`);
-  });
-})
-.catch((error) => {
-  logger.error('❌ MongoDB connection error:', error);
-  process.exit(1);
-});
+// Add the request logger first (optional but useful)
+app.use(requestLogger);
+
+// … all normal routes go here …
+
+// 404 handler – must be after routes
+app.use(notFoundHandler);
+
+// Global error handler – must be last
+app.use(errorHandler);
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
-  logger.info('SIGTERM received. Shutting down gracefully...');
-  mongoose.connection.close(() => {
-    logger.info('MongoDB connection closed.');
-    process.exit(0);
-  });
+  console.log('SIGTERM received, shutting down gracefully');
+  process.exit(0);
 });
 
-export default app;
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully');
+  process.exit(0);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+  process.exit(1);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
+const PORT = process.env.PORT || 3001;
+
+// Start server
+const server = app.listen(PORT, () => {
+  console.log(`🚀 Weblify.AI Backend running on port ${PORT}`);
+  console.log(`📝 Environment: ${process.env.NODE_ENV}`);
+  console.log(`🔗 API Base URL: http://localhost:${PORT}/api`);
+  console.log(`💚 Health Check: http://localhost:${PORT}/health`);
+});
+
+module.exports = { app, server };

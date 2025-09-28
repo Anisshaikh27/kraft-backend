@@ -1,14 +1,17 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
 /node_modules
+/.pnp
+.pnp.js
 
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-lerna-debug.log*
+# testing
+/coverage
 
-# Editor directories and files
+# production
+/build
+
+# misc
 .DS_Store
 .env
 .env.local
@@ -16,6 +19,6 @@ lerna-debug.log*
 .env.test.local
 .env.production.local
 
-# Test and coverage reports
-coverage
-test-results
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
