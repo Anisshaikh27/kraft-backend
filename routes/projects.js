@@ -6,11 +6,22 @@ const { asyncHandler, ValidationError } = require('../middleware/errorHandler');
 const router = express.Router();
 const projectController = new ProjectController();
 
-// Validation middleware
+// Enhanced validation middleware with better error messages
 const validateRequest = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    throw new ValidationError('Validation failed', errors.array());
+    const errorMessages = errors.array().map(error => ({
+      field: error.path,
+      message: error.msg,
+      value: error.value
+    }));
+    
+    console.error('Validation errors:', errorMessages);
+    return res.status(400).json({
+      error: 'Validation failed',
+      details: errorMessages,
+      message: `Invalid ${errorMessages[0].field}: ${errorMessages[0].message}`
+    });
   }
   next();
 };
@@ -53,12 +64,23 @@ router.get('/',
   })
 );
 
-// GET /api/projects/:id - Get specific project
+// GET /api/projects/:id - Get specific project (FIXED VALIDATION)
 router.get('/:id',
   [
     param('id')
-      .isUUID()
-      .withMessage('Invalid project ID')
+      .notEmpty()
+      .withMessage('Project ID is required')
+      .custom((value) => {
+        // Check if it's a valid UUID format or at least not 'undefined'
+        if (value === 'undefined' || value === 'null') {
+          throw new Error('Project ID cannot be undefined or null');
+        }
+        // Basic UUID format check (loose - allows other ID formats too)
+        if (typeof value !== 'string' || value.length < 10) {
+          throw new Error('Project ID must be a valid identifier');
+        }
+        return true;
+      })
   ],
   validateRequest,
   asyncHandler(async (req, res) => {
@@ -70,8 +92,17 @@ router.get('/:id',
 router.put('/:id',
   [
     param('id')
-      .isUUID()
-      .withMessage('Invalid project ID'),
+      .notEmpty()
+      .withMessage('Project ID is required')
+      .custom((value) => {
+        if (value === 'undefined' || value === 'null') {
+          throw new Error('Project ID cannot be undefined or null');
+        }
+        if (typeof value !== 'string' || value.length < 10) {
+          throw new Error('Project ID must be a valid identifier');
+        }
+        return true;
+      }),
     
     body('name')
       .optional()
@@ -100,8 +131,17 @@ router.put('/:id',
 router.delete('/:id',
   [
     param('id')
-      .isUUID()
-      .withMessage('Invalid project ID')
+      .notEmpty()
+      .withMessage('Project ID is required')
+      .custom((value) => {
+        if (value === 'undefined' || value === 'null') {
+          throw new Error('Project ID cannot be undefined or null');
+        }
+        if (typeof value !== 'string' || value.length < 10) {
+          throw new Error('Project ID must be a valid identifier');
+        }
+        return true;
+      })
   ],
   validateRequest,
   asyncHandler(async (req, res) => {
@@ -113,8 +153,14 @@ router.delete('/:id',
 router.post('/:id/clone',
   [
     param('id')
-      .isUUID()
-      .withMessage('Invalid project ID'),
+      .notEmpty()
+      .withMessage('Project ID is required')
+      .custom((value) => {
+        if (value === 'undefined' || value === 'null') {
+          throw new Error('Project ID cannot be undefined or null');
+        }
+        return true;
+      }),
     
     body('name')
       .optional()
@@ -132,8 +178,14 @@ router.post('/:id/clone',
 router.get('/:id/export',
   [
     param('id')
-      .isUUID()
-      .withMessage('Invalid project ID')
+      .notEmpty()
+      .withMessage('Project ID is required')
+      .custom((value) => {
+        if (value === 'undefined' || value === 'null') {
+          throw new Error('Project ID cannot be undefined or null');
+        }
+        return true;
+      })
   ],
   validateRequest,
   asyncHandler(async (req, res) => {

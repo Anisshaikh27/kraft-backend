@@ -1,379 +1,327 @@
 const GroqService = require('../services/groqService');
 const GeminiService = require('../services/geminiService');
-const { 
-  getSystemPrompt, 
-  getReactPrompt, 
-  getFullStackPrompt,
-  getDebuggingPrompt,
-  getOptimizationPrompt 
-} = require('../prompts/systemPrompts');
-const { 
-  getReactComponentPrompt,
-  getReactHooksPrompt,
-  getReactContextPrompt,
-  getReactTailwindPrompt 
-} = require('../prompts/reactPrompts');
-const { 
-  getBaseCodePrompt,
-  getProjectInitPrompt 
-} = require('../prompts/basePrompts');
 
 class AIController {
   constructor() {
     this.groqService = new GroqService();
     this.geminiService = new GeminiService();
+    
+    // Configuration
     this.primaryProvider = process.env.PRIMARY_AI_PROVIDER || 'groq';
     this.fallbackProvider = process.env.FALLBACK_AI_PROVIDER || 'gemini';
   }
 
   async generateCode(req, res) {
+    const startTime = Date.now();
+    
     try {
-      const {
-        prompt,
-        type = 'general', // general, react, component, hook, fullstack, debug, optimize
-        context = {},
-        provider = null // Allow override
-      } = req.body;
+      const { prompt, type = 'react', context = {} } = req.body;
 
-      if (!prompt) {
+      if (!prompt || prompt.trim() === '') {
         return res.status(400).json({
+          success: false,
           error: 'Prompt is required',
           message: 'Please provide a prompt for code generation'
         });
       }
 
-      // Get appropriate system prompt based on type
-      const systemPrompt = this.getSystemPromptByType(type, context);
+      console.log('\n=== AI GENERATION REQUEST ===');
+      console.log('Prompt:', prompt);
+      console.log('Type:', type);
+      console.log('Context:', JSON.stringify(context, null, 2));
+      console.log('Primary Provider:', this.primaryProvider);
+      console.log('Fallback Provider:', this.fallbackProvider);
+      console.log('===============================\n');
 
-      // Enhanced user prompt with context
-      const enhancedPrompt = this.enhanceUserPrompt(prompt, type, context);
+      let response;
+      let usedProvider;
+      let error;
 
-      // Try primary provider first, then fallback
-      const useProvider = provider || this.primaryProvider;
-      let result;
-
+      // Try primary provider first
       try {
-        result = await this.callAIProvider(useProvider, systemPrompt, enhancedPrompt, context);
-      } catch (error) {
-        console.log(`Primary provider (${useProvider}) failed:`, error.message);
+        console.log(`🚀 Trying primary provider: ${this.primaryProvider}`);
         
+        if (this.primaryProvider === 'groq') {
+          console.log('🔄 Calling Groq service...');
+          response = await this.groqService.generateCode(prompt, type, context);
+          usedProvider = 'groq';
+          console.log('✅ Groq service responded successfully');
+        } else if (this.primaryProvider === 'gemini') {
+          console.log('🔄 Calling Gemini service...');
+          response = await this.geminiService.generateCode(prompt, type, context);
+          usedProvider = 'gemini';
+          console.log('✅ Gemini service responded successfully');
+        }
+      } catch (primaryError) {
+        console.log(`❌ Primary provider (${this.primaryProvider}) failed:`, primaryError.message);
+        error = primaryError;
+
         // Try fallback provider
-        const fallbackProvider = useProvider === 'groq' ? 'gemini' : 'groq';
-        console.log(`Trying fallback provider: ${fallbackProvider}`);
-        
         try {
-          result = await this.callAIProvider(fallbackProvider, systemPrompt, enhancedPrompt, context);
+          console.log(`🔄 Trying fallback provider: ${this.fallbackProvider}`);
+          
+          if (this.fallbackProvider === 'gemini' && this.primaryProvider !== 'gemini') {
+            console.log('🔄 Calling Gemini service (fallback)...');
+            response = await this.geminiService.generateCode(prompt, type, context);
+            usedProvider = 'gemini';
+            console.log('✅ Gemini fallback succeeded');
+          } else if (this.fallbackProvider === 'groq' && this.primaryProvider !== 'groq') {
+            console.log('🔄 Calling Groq service (fallback)...');
+            response = await this.groqService.generateCode(prompt, type, context);
+            usedProvider = 'groq';
+            console.log('✅ Groq fallback succeeded');
+          }
         } catch (fallbackError) {
-          console.error('Both providers failed:', fallbackError.message);
-          throw new Error('All AI providers are currently unavailable. Please try again later.');
+          console.log(`❌ Fallback provider (${this.fallbackProvider}) also failed:`, fallbackError.message);
+          throw new Error(`All AI providers failed. Primary: ${error.message}, Fallback: ${fallbackError.message}`);
         }
       }
 
-      // Parse and enhance the response
-      const parsedResult = this.parseAIResponse(result.content, type);
+      if (!response) {
+        throw new Error('No response received from any AI provider');
+      }
 
-      res.json({
+      // Log the raw AI response for debugging
+      console.log('\n=== RAW AI RESPONSE ===');
+      console.log('Provider used:', usedProvider);
+      console.log('Response type:', typeof response);
+      console.log('Response keys:', Object.keys(response || {}));
+      console.log('Full response:', JSON.stringify(response, null, 2));
+      console.log('=======================\n');
+
+      // FIXED: Process and structure the response correctly
+      const processedResponse = this.processAIResponse(response, usedProvider);
+      
+      console.log('\n=== PROCESSED RESPONSE ===');
+      console.log('Content length:', processedResponse.content?.length || 0);
+      console.log('Number of files:', processedResponse.files?.length || 0);
+      console.log('Files:', processedResponse.files?.map(f => f.path) || []);
+      console.log('===========================\n');
+
+      const processingTime = Date.now() - startTime;
+
+      const finalResponse = {
         success: true,
         data: {
-          ...parsedResult,
-          model: result.model,
-          provider: result.provider,
-          usage: result.usage
+          ...processedResponse,
+          model: response.model || 'unknown',
+          provider: usedProvider,
+          usage: response.usage || null
         },
         metadata: {
           type,
           timestamp: new Date().toISOString(),
-          processingTime: Date.now() - req.startTime
+          processingTime
         }
-      });
+      };
+
+      console.log('✅ Final response being sent:', JSON.stringify(finalResponse, null, 2));
+
+      res.json(finalResponse);
 
     } catch (error) {
-      console.error('Code generation error:', error);
+      const processingTime = Date.now() - startTime;
+      
+      console.log('\n❌ AI GENERATION ERROR ===');
+      console.log('Error message:', error.message);
+      console.log('Error stack:', error.stack);
+      console.log('Processing time:', processingTime, 'ms');
+      console.log('==========================\n');
+
       res.status(500).json({
+        success: false,
         error: 'Code generation failed',
+        message: error.message,
+        timestamp: new Date().toISOString(),
+        processingTime
+      });
+    }
+  }
+
+  // FIXED: This method was the problem!
+  processAIResponse(response, provider) {
+    console.log(`🔄 Processing ${provider} response...`);
+
+    // Initialize default structure
+    let processedResponse = {
+      content: '',
+      files: [],
+      explanation: '',
+      suggestions: []
+    };
+
+    try {
+      let content = '';
+
+      // Extract content based on provider
+      if (provider === 'groq') {
+        // For Groq, the response should already have the content extracted
+        content = response.content || '';
+        console.log(`📝 Groq content extracted: ${content.length} characters`);
+      } else if (provider === 'gemini') {
+        // Handle Gemini response format
+        if (response.candidates && response.candidates[0]) {
+          content = response.candidates[0].content?.parts?.[0]?.text || '';
+        }
+        console.log(`📝 Gemini content extracted: ${content.length} characters`);
+      }
+
+      // Set the content
+      processedResponse.content = content;
+      processedResponse.explanation = content;
+
+      // FIXED: Extract files from the content properly
+      if (content) {
+        const extractedFiles = this.extractFilesFromContent(content);
+        processedResponse.files = extractedFiles;
+        console.log(`📁 Extracted ${extractedFiles.length} files from content`);
+      } else {
+        console.log('⚠️ No content to extract files from');
+      }
+
+      // If no files were extracted but we have content, create a default file
+      if (processedResponse.files.length === 0 && content.trim()) {
+        console.log('⚠️ No files extracted, creating default file...');
+        const defaultFile = {
+          path: 'src/components/GeneratedComponent.jsx',
+          content: content,
+          language: 'javascript',
+          operation: 'create'
+        };
+        processedResponse.files = [defaultFile];
+      }
+
+    } catch (error) {
+      console.error('Error processing AI response:', error);
+      processedResponse.content = 'Error processing AI response: ' + error.message;
+    }
+
+    console.log(`✅ Processing complete: ${processedResponse.content.length} chars, ${processedResponse.files.length} files`);
+    return processedResponse;
+  }
+
+  // FIXED: Better file extraction
+  extractFilesFromContent(content) {
+    console.log('🔍 Extracting files from content...');
+    
+    const files = [];
+    
+    // Look for code blocks with file paths (pattern: // src/path/file.ext)
+    const fileRegex = /\/\/\s+(src\/[^\n]+\.(jsx?|tsx?|css|html|json|md))\s*\n```[\w]*\n([\s\S]*?)```/g;
+    let match;
+    
+    while ((match = fileRegex.exec(content)) !== null) {
+      const filePath = match[1].trim();
+      const fileContent = match[3].trim();
+      
+      if (fileContent && filePath) {
+        files.push({
+          path: filePath,
+          content: fileContent,
+          language: this.getLanguageFromPath(filePath),
+          operation: 'create'
+        });
+        console.log(`📄 Extracted file: ${filePath} (${fileContent.length} chars)`);
+      }
+    }
+
+    // Fallback: Look for any code blocks
+    if (files.length === 0) {
+      const codeBlockRegex = /```(?:jsx?|typescript|tsx?)?\n([\s\S]*?)```/g;
+      let codeMatch;
+      let fileIndex = 1;
+      
+      while ((codeMatch = codeBlockRegex.exec(content)) !== null) {
+        const codeContent = codeMatch[1].trim();
+        
+        if (codeContent) {
+          // Determine file path based on content
+          let filePath = `src/components/Component${fileIndex}.jsx`;
+          
+          if (codeContent.includes('export default') || codeContent.includes('const ') || codeContent.includes('function ')) {
+            filePath = `src/components/GeneratedComponent${fileIndex === 1 ? '' : fileIndex}.jsx`;
+          }
+          
+          files.push({
+            path: filePath,
+            content: codeContent,
+            language: 'javascript',
+            operation: 'create'
+          });
+          
+          console.log(`📄 Extracted code block ${fileIndex}: ${filePath} (${codeContent.length} chars)`);
+          fileIndex++;
+        }
+      }
+    }
+
+    console.log(`📁 Total extracted: ${files.length} files`);
+    return files;
+  }
+
+  getLanguageFromPath(filePath) {
+    const extension = filePath.split('.').pop()?.toLowerCase();
+    const languageMap = {
+      'js': 'javascript',
+      'jsx': 'javascript',
+      'ts': 'typescript',
+      'tsx': 'typescript',
+      'css': 'css',
+      'html': 'html',
+      'json': 'json',
+      'md': 'markdown'
+    };
+    return languageMap[extension] || 'javascript';
+  }
+
+  // Health check for AI services
+  async healthCheck(req, res) {
+    try {
+      console.log('🏥 Checking AI services health...');
+      
+      const health = {
+        status: 'healthy',
+        providers: {},
+        timestamp: new Date().toISOString()
+      };
+
+      // Check Groq
+      try {
+        await this.groqService.healthCheck();
+        health.providers.groq = { status: 'available', error: null };
+        console.log('✅ Groq service is healthy');
+      } catch (error) {
+        health.providers.groq = { status: 'unavailable', error: error.message };
+        console.log('❌ Groq service is unhealthy:', error.message);
+      }
+
+      // Check Gemini
+      try {
+        await this.geminiService.healthCheck();
+        health.providers.gemini = { status: 'available', error: null };
+        console.log('✅ Gemini service is healthy');
+      } catch (error) {
+        health.providers.gemini = { status: 'unavailable', error: error.message };
+        console.log('❌ Gemini service is unhealthy:', error.message);
+      }
+
+      // Determine overall status
+      const availableProviders = Object.values(health.providers).filter(p => p.status === 'available').length;
+      if (availableProviders === 0) {
+        health.status = 'unhealthy';
+      } else if (availableProviders === 1) {
+        health.status = 'degraded';
+      }
+
+      res.json(health);
+    } catch (error) {
+      console.error('Health check error:', error);
+      res.status(500).json({
+        status: 'error',
         message: error.message,
         timestamp: new Date().toISOString()
       });
     }
-  }
-
-  async chatWithAI(req, res) {
-    try {
-      const {
-        messages,
-        context = {},
-        provider = null
-      } = req.body;
-
-      if (!messages || !Array.isArray(messages)) {
-        return res.status(400).json({
-          error: 'Messages array is required'
-        });
-      }
-
-      const useProvider = provider || this.primaryProvider;
-      let result;
-
-      try {
-        if (useProvider === 'groq') {
-          result = await this.groqService.generateChat(messages);
-        } else {
-          result = await this.geminiService.generateChat(messages);
-        }
-      } catch (error) {
-        // Try fallback
-        const fallbackProvider = useProvider === 'groq' ? 'gemini' : 'groq';
-        if (fallbackProvider === 'groq') {
-          result = await this.groqService.generateChat(messages);
-        } else {
-          result = await this.geminiService.generateChat(messages);
-        }
-      }
-
-      res.json({
-        success: true,
-        data: result,
-        timestamp: new Date().toISOString()
-      });
-
-    } catch (error) {
-      console.error('Chat error:', error);
-      res.status(500).json({
-        error: 'Chat failed',
-        message: error.message
-      });
-    }
-  }
-
-  async getAvailableModels(req, res) {
-    try {
-      const groqModels = await this.groqService.getModels();
-      const geminiModels = await this.geminiService.getModels();
-
-      res.json({
-        success: true,
-        data: {
-          groq: {
-            available: await this.groqService.isAvailable(),
-            models: groqModels
-          },
-          gemini: {
-            available: await this.geminiService.isAvailable(),
-            models: geminiModels
-          }
-        }
-      });
-    } catch (error) {
-      console.error('Error fetching models:', error);
-      res.status(500).json({
-        error: 'Failed to fetch models',
-        message: error.message
-      });
-    }
-  }
-
-  async healthCheck(req, res) {
-    try {
-      const groqHealth = await this.groqService.healthCheck();
-      const geminiHealth = await this.geminiService.healthCheck();
-
-      const isHealthy = groqHealth.status === 'healthy' || geminiHealth.status === 'healthy';
-
-      res.status(isHealthy ? 200 : 503).json({
-        success: isHealthy,
-        data: {
-          groq: groqHealth,
-          gemini: geminiHealth,
-          primary: this.primaryProvider,
-          fallback: this.fallbackProvider
-        },
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      res.status(503).json({
-        success: false,
-        error: 'Health check failed',
-        message: error.message
-      });
-    }
-  }
-
-  // Helper methods
-
-  getSystemPromptByType(type, context) {
-    const basePrompt = getSystemPrompt(context.workingDirectory);
-    
-    switch (type) {
-      case 'react':
-        return basePrompt + '\n\n' + getReactPrompt();
-      
-      case 'component':
-        return basePrompt + '\n\n' + getReactComponentPrompt();
-      
-      case 'hook':
-        return basePrompt + '\n\n' + getReactHooksPrompt();
-      
-      case 'context':
-        return basePrompt + '\n\n' + getReactContextPrompt();
-      
-      case 'tailwind':
-        return basePrompt + '\n\n' + getReactTailwindPrompt();
-      
-      case 'fullstack':
-        return basePrompt + '\n\n' + getFullStackPrompt();
-      
-      case 'debug':
-        return basePrompt + '\n\n' + getDebuggingPrompt();
-      
-      case 'optimize':
-        return basePrompt + '\n\n' + getOptimizationPrompt();
-      
-      case 'init':
-        return basePrompt + '\n\n' + getProjectInitPrompt();
-      
-      default:
-        return basePrompt + '\n\n' + getBaseCodePrompt();
-    }
-  }
-
-  enhanceUserPrompt(prompt, type, context) {
-    let enhancedPrompt = prompt;
-
-    // Add context information
-    if (context.projectType) {
-      enhancedPrompt += `\n\nProject Type: ${context.projectType}`;
-    }
-
-    if (context.targetFramework) {
-      enhancedPrompt += `\nTarget Framework: ${context.targetFramework}`;
-    }
-
-    if (context.requirements && context.requirements.length > 0) {
-      enhancedPrompt += `\nRequirements: ${context.requirements.join(', ')}`;
-    }
-
-    // Add type-specific enhancements
-    switch (type) {
-      case 'component':
-        enhancedPrompt += '\n\nPlease create a React functional component with proper TypeScript types (if applicable), styling with Tailwind CSS, and include proper accessibility attributes.';
-        break;
-      
-      case 'hook':
-        enhancedPrompt += '\n\nPlease create a custom React hook with proper TypeScript types, error handling, and comprehensive JSDoc documentation.';
-        break;
-      
-      case 'fullstack':
-        enhancedPrompt += '\n\nPlease create both frontend and backend code with proper API endpoints, error handling, and security considerations.';
-        break;
-      
-      case 'debug':
-        enhancedPrompt += '\n\nPlease identify the issue, explain the problem, and provide a corrected version with explanation of the changes.';
-        break;
-      
-      case 'optimize':
-        enhancedPrompt += '\n\nPlease analyze the code for performance issues and provide optimized version with explanations of improvements.';
-        break;
-    }
-
-    return enhancedPrompt;
-  }
-
-  async callAIProvider(provider, systemPrompt, userPrompt, context) {
-    if (provider === 'groq') {
-      if (!await this.groqService.isAvailable()) {
-        throw new Error('Groq service not available');
-      }
-      return await this.groqService.generateCode(systemPrompt, userPrompt, context);
-    } else if (provider === 'gemini') {
-      if (!await this.geminiService.isAvailable()) {
-        throw new Error('Gemini service not available');
-      }
-      return await this.geminiService.generateCode(systemPrompt, userPrompt, context);
-    } else {
-      throw new Error(`Unknown provider: ${provider}`);
-    }
-  }
-
-  parseAIResponse(content, type) {
-    const result = {
-      content: content,
-      files: [],
-      suggestions: [],
-      explanation: ''
-    };
-
-    // Extract file operations from bolt format
-    const fileOperationRegex = /<bolt_file_operations>([\s\S]*?)<\/bolt_file_operations>/g;
-    const createFileRegex = /<bolt_create_file path="([^"]+)">([\s\S]*?)<\/bolt_create_file>/g;
-    const editFileRegex = /<bolt_edit_file path="([^"]+)">([\s\S]*?)<\/bolt_edit_file>/g;
-
-    let match;
-
-    // Extract file operations
-    while ((match = fileOperationRegex.exec(content)) !== null) {
-      const operations = match[1];
-      
-      // Extract create file operations
-      let createMatch;
-      while ((createMatch = createFileRegex.exec(operations)) !== null) {
-        result.files.push({
-          path: createMatch[1],
-          content: createMatch[2].trim(),
-          operation: 'create'
-        });
-      }
-
-      // Extract edit file operations
-      let editMatch;
-      while ((editMatch = editFileRegex.exec(operations)) !== null) {
-        result.files.push({
-          path: editMatch[1],
-          content: editMatch[2].trim(),
-          operation: 'edit'
-        });
-      }
-    }
-
-    // Extract code blocks for non-file operations
-    if (result.files.length === 0) {
-      const codeBlockRegex = /```(\w+)?\n([\s\S]*?)\n```/g;
-      while ((match = codeBlockRegex.exec(content)) !== null) {
-        const language = match[1] || 'text';
-        const code = match[2].trim();
-        
-        result.files.push({
-          path: `generated.${this.getExtensionForLanguage(language)}`,
-          content: code,
-          language: language,
-          operation: 'create'
-        });
-      }
-    }
-
-    // Clean content of file operations for explanation
-    result.explanation = content.replace(fileOperationRegex, '').trim();
-
-    return result;
-  }
-
-  getExtensionForLanguage(language) {
-    const extensions = {
-      javascript: 'js',
-      js: 'js',
-      typescript: 'ts',
-      ts: 'ts',
-      jsx: 'jsx',
-      tsx: 'tsx',
-      html: 'html',
-      css: 'css',
-      json: 'json',
-      python: 'py',
-      sql: 'sql',
-      bash: 'sh',
-      shell: 'sh'
-    };
-
-    return extensions[language.toLowerCase()] || 'txt';
   }
 }
 

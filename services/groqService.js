@@ -3,214 +3,163 @@ const Groq = require('groq-sdk');
 class GroqService {
   constructor() {
     if (!process.env.GROQ_API_KEY) {
-      console.warn('⚠️  GROQ_API_KEY not set. Groq service will not be available.');
-      this.client = null;
+      console.log('⚠️  GROQ_API_KEY not set. Groq service will not be available.');
+      this.available = false;
       return;
     }
 
     this.client = new Groq({
       apiKey: process.env.GROQ_API_KEY,
     });
-
     this.model = process.env.GROQ_MODEL || 'llama-3.1-70b-versatile';
-    this.maxTokens = parseInt(process.env.GROQ_MAX_TOKENS) || 4096;
-    this.temperature = parseFloat(process.env.GROQ_TEMPERATURE) || 0.1;
-
-    // Rate limiting properties
-    this.requestCount = 0;
-    this.lastReset = Date.now();
-    this.rateLimitWindow = 60000; // 1 minute
-    this.maxRequestsPerWindow = 30; // Conservative limit for free tier
-  }
-
-  async isAvailable() {
-    return this.client !== null;
-  }
-
-  checkRateLimit() {
-    const now = Date.now();
+    this.available = true;
     
-    // Reset counter if window has passed
-    if (now - this.lastReset > this.rateLimitWindow) {
-      this.requestCount = 0;
-      this.lastReset = now;
-    }
-
-    // Check if we're within limits
-    if (this.requestCount >= this.maxRequestsPerWindow) {
-      throw new Error('Groq rate limit exceeded. Please try again later.');
-    }
-
-    this.requestCount++;
+    console.log('✅ Groq service initialized');
+    console.log('   Model:', this.model);
   }
 
-  async generateCode(systemPrompt, userPrompt, context = {}) {
-    if (!this.client) {
+  async generateCode(prompt, type = 'react', context = {}) {
+    if (!this.available) {
       throw new Error('Groq service not available. API key not configured.');
     }
 
-    this.checkRateLimit();
-
     try {
-      const messages = [
-        {
-          role: "system",
-          content: systemPrompt
-        }
-      ];
+      console.log('🚀 Making Groq API call...');
+      console.log('   Prompt:', prompt.substring(0, 100) + '...');
+      console.log('   Model:', this.model);
 
-      // Add context if provided
-      if (context.projectStructure) {
-        messages.push({
-          role: "system",
-          content: `Current project structure:\n${JSON.stringify(context.projectStructure, null, 2)}`
-        });
-      }
-
-      if (context.currentFiles && context.currentFiles.length > 0) {
-        messages.push({
-          role: "system", 
-          content: `Current files in project:\n${context.currentFiles.map(file => 
-            `File: ${file.path}\n\`\`\`${file.language || ''}\n${file.content}\n\`\`\``
-          ).join('\n\n')}`
-        });
-      }
-
-      messages.push({
-        role: "user",
-        content: userPrompt
-      });
-
-      const completion = await this.client.chat.completions.create({
-        messages,
+      const response = await this.client.chat.completions.create({
+        messages: [
+          {
+            role: 'system',
+            content: this.getSystemPrompt(type)
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
         model: this.model,
-        temperature: this.temperature,
-        max_tokens: this.maxTokens,
-        top_p: 1,
-        stream: false,
+        temperature: 0.1,
+        max_tokens: 4000,
+        stream: false
       });
 
-      if (!completion.choices || completion.choices.length === 0) {
-        throw new Error('No completion choices returned from Groq');
+      console.log('✅ Groq API responded');
+      console.log('   Response type:', typeof response);
+      console.log('   Response keys:', Object.keys(response || {}));
+
+      // Debug: Log the full response structure
+      console.log('=== RAW GROQ RESPONSE ===');
+      console.log(JSON.stringify(response, null, 2));
+      console.log('=========================');
+
+      // Extract content from the response
+      let content = '';
+      if (response.choices && response.choices[0]) {
+        content = response.choices[0].message?.content || response.choices[0].text || '';
+      } else if (response.content) {
+        content = response.content;
+      } else if (response.data) {
+        content = response.data;
       }
 
-      const response = completion.choices[0].message.content;
-      
+      console.log('📝 Extracted content length:', content.length);
+      console.log('📝 Content preview:', content.substring(0, 200) + '...');
+
+      // Return in expected format
       return {
         success: true,
-        content: response,
+        content: content,
         model: this.model,
         provider: 'groq',
-        usage: {
-          promptTokens: completion.usage?.prompt_tokens || 0,
-          completionTokens: completion.usage?.completion_tokens || 0,
-          totalTokens: completion.usage?.total_tokens || 0
-        }
+        usage: response.usage || null,
+        // Keep original response for debugging
+        raw: response
       };
 
     } catch (error) {
-      console.error('Groq API error:', error.message);
-
-      // Handle specific Groq errors
-      if (error.status === 429) {
-        throw new Error('Groq rate limit exceeded. Please try again later.');
-      }
-      
-      if (error.status === 401) {
-        throw new Error('Groq API authentication failed. Please check your API key.');
-      }
-
-      if (error.status >= 500) {
-        throw new Error('Groq service temporarily unavailable. Trying fallback...');
-      }
-
+      console.error('❌ Groq API error:', error.message);
       throw new Error(`Groq API error: ${error.message}`);
     }
   }
 
-  async generateChat(messages, options = {}) {
-    if (!this.client) {
-      throw new Error('Groq service not available. API key not configured.');
-    }
+  getSystemPrompt(type) {
+    const prompts = {
+      react: `You are an expert React developer. Generate clean, modern React code with the following guidelines:
 
-    this.checkRateLimit();
+1. Use functional components with hooks
+2. Include proper imports
+3. Use modern JavaScript/ES6+ features
+4. Add helpful comments
+5. Follow React best practices
+6. Include proper error handling where appropriate
+7. Use Tailwind CSS for styling when possible
 
-    try {
-      const completion = await this.client.chat.completions.create({
-        messages,
-        model: options.model || this.model,
-        temperature: options.temperature || this.temperature,
-        max_tokens: options.maxTokens || this.maxTokens,
-        top_p: options.topP || 1,
-        stream: options.stream || false,
-      });
+Format your response as complete, ready-to-use code. If creating multiple files, clearly separate them with file path comments like:
 
-      return {
-        success: true,
-        content: completion.choices[0].message.content,
-        model: completion.model,
-        provider: 'groq',
-        usage: completion.usage
-      };
+// src/components/ComponentName.jsx
+[component code here]
 
-    } catch (error) {
-      console.error('Groq chat error:', error.message);
-      throw error;
-    }
+// src/styles/ComponentName.css  
+[css code here if needed]
+
+Provide clean, production-ready code that can be directly used.`,
+
+      component: `You are an expert React developer. Create a single, focused React component with these requirements:
+
+1. Functional component using hooks
+2. Proper TypeScript types if applicable
+3. Clean, readable code structure
+4. Responsive design with Tailwind CSS
+5. Proper prop validation
+6. Good accessibility practices
+7. Comprehensive error handling
+
+Return only the component code with necessary imports.`,
+
+      fullstack: `You are a full-stack developer. Create both frontend and backend code as requested:
+
+1. Frontend: Modern React with hooks and Tailwind CSS
+2. Backend: Node.js/Express with proper error handling
+3. Database: Include schema/model definitions
+4. API: RESTful endpoints with validation
+5. Security: Basic authentication and data validation
+6. Documentation: Clear comments and usage examples
+
+Separate files clearly with path comments.`,
+
+      general: `You are an expert software developer. Write clean, efficient code following best practices:
+
+1. Clear, readable code structure
+2. Proper error handling
+3. Good documentation/comments
+4. Modern language features
+5. Security considerations
+6. Performance optimization where relevant
+
+Provide complete, working code that can be immediately used.`
+    };
+
+    return prompts[type] || prompts.general;
   }
 
-  // Get available models
-  async getModels() {
-    if (!this.client) {
-      return [];
-    }
-
-    try {
-      // Groq supported models for code generation
-      return [
-        { id: 'llama-3.1-405b-reasoning', name: 'Llama 3.1 405B (Reasoning)', context: 131072 },
-        { id: 'llama-3.1-70b-versatile', name: 'Llama 3.1 70B (Versatile)', context: 131072 },
-        { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B (Instant)', context: 131072 },
-        { id: 'llama3-70b-8192', name: 'Llama 3 70B', context: 8192 },
-        { id: 'llama3-8b-8192', name: 'Llama 3 8B', context: 8192 },
-        { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B', context: 32768 },
-        { id: 'gemma-7b-it', name: 'Gemma 7B', context: 8192 }
-      ];
-    } catch (error) {
-      console.error('Error fetching Groq models:', error.message);
-      return [];
-    }
-  }
-
-  // Health check
   async healthCheck() {
-    if (!this.client) {
-      return { status: 'unavailable', error: 'API key not configured' };
+    if (!this.available) {
+      throw new Error('Groq service not available');
     }
 
     try {
-      // Try a simple request to verify the service is working
-      const testResponse = await this.client.chat.completions.create({
+      // Simple health check - just verify we can make a request
+      const response = await this.client.chat.completions.create({
         messages: [{ role: 'user', content: 'Hello' }],
         model: this.model,
-        max_tokens: 10,
-        temperature: 0,
+        max_tokens: 10
       });
-
-      return { 
-        status: 'healthy', 
-        model: this.model,
-        rateLimit: {
-          requests: this.requestCount,
-          window: this.rateLimitWindow,
-          max: this.maxRequestsPerWindow
-        }
-      };
+      
+      return { status: 'healthy', model: this.model };
     } catch (error) {
-      return { 
-        status: 'unhealthy', 
-        error: error.message 
-      };
+      throw new Error(`Groq health check failed: ${error.message}`);
     }
   }
 }
