@@ -11,7 +11,7 @@ class GroqService {
     this.client = new Groq({
       apiKey: process.env.GROQ_API_KEY,
     });
-    this.model = process.env.GROQ_MODEL || 'llama-3.1-70b-versatile';
+    this.model = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
     this.available = true;
     
     console.log('✅ Groq service initialized');
@@ -32,7 +32,7 @@ class GroqService {
         messages: [
           {
             role: 'system',
-            content: this.getSystemPrompt(type)
+            content: this.getEnhancedSystemPrompt(type)
           },
           {
             role: 'user',
@@ -46,22 +46,11 @@ class GroqService {
       });
 
       console.log('✅ Groq API responded');
-      console.log('   Response type:', typeof response);
-      console.log('   Response keys:', Object.keys(response || {}));
-
-      // Debug: Log the full response structure
-      console.log('=== RAW GROQ RESPONSE ===');
-      console.log(JSON.stringify(response, null, 2));
-      console.log('=========================');
 
       // Extract content from the response
       let content = '';
       if (response.choices && response.choices[0]) {
-        content = response.choices[0].message?.content || response.choices[0].text || '';
-      } else if (response.content) {
-        content = response.content;
-      } else if (response.data) {
-        content = response.data;
+        content = response.choices[0].message?.content || '';
       }
 
       console.log('📝 Extracted content length:', content.length);
@@ -73,9 +62,7 @@ class GroqService {
         content: content,
         model: this.model,
         provider: 'groq',
-        usage: response.usage || null,
-        // Keep original response for debugging
-        raw: response
+        usage: response.usage || null
       };
 
     } catch (error) {
@@ -84,61 +71,111 @@ class GroqService {
     }
   }
 
-  getSystemPrompt(type) {
+  // ENHANCED: Better system prompts with clear file structure requirements
+  getEnhancedSystemPrompt(type) {
+    const baseInstructions = `You are an expert full-stack developer. Follow these CRITICAL formatting rules:
+
+🚨 CRITICAL FILE FORMAT RULES:
+1. Always start each file with: // src/path/filename.ext
+2. Follow immediately with: \`\`\`language
+3. Then put the complete file content
+4. End with: \`\`\`
+
+Example format:
+// src/components/Header.jsx
+\`\`\`jsx
+import React from 'react';
+
+const Header = () => {
+  return (
+    <header className="bg-blue-600 text-white p-4">
+      <h1>My App</h1>
+    </header>
+  );
+};
+
+export default Header;
+\`\`\`
+
+// src/App.js
+\`\`\`jsx
+import React from 'react';
+import Header from './components/Header';
+
+function App() {
+  return (
+    <div className="App">
+      <Header />
+    </div>
+  );
+}
+
+export default App;
+\`\`\`
+
+NEVER use **filename** format or any other format. ALWAYS use // filepath format.`;
+
     const prompts = {
-      react: `You are an expert React developer. Generate clean, modern React code with the following guidelines:
+      react: `${baseInstructions}
 
-1. Use functional components with hooks
-2. Include proper imports
-3. Use modern JavaScript/ES6+ features
-4. Add helpful comments
-5. Follow React best practices
-6. Include proper error handling where appropriate
-7. Use Tailwind CSS for styling when possible
+🎯 REACT PROJECT REQUIREMENTS:
+- Create a complete, functional React application
+- Include package.json, public/index.html, src/index.js, src/App.js
+- Use modern React (functional components, hooks)
+- Add proper imports and exports
+- Use Tailwind CSS for styling
+- Make it production-ready with proper file structure
+- Always include at least 5-8 files for a complete project
 
-Format your response as complete, ready-to-use code. If creating multiple files, clearly separate them with file path comments like:
+📁 REQUIRED FILES STRUCTURE:
+1. package.json (with all dependencies)
+2. public/index.html 
+3. src/index.js (React 18 createRoot)
+4. src/App.js (main app component)
+5. src/index.css (with Tailwind imports)
+6. tailwind.config.js
+7. Components as requested
 
-// src/components/ComponentName.jsx
-[component code here]
+Generate complete, working code that can be immediately used in production.`,
 
-// src/styles/ComponentName.css  
-[css code here if needed]
+      component: `${baseInstructions}
 
-Provide clean, production-ready code that can be directly used.`,
+🎯 COMPONENT REQUIREMENTS:
+- Create focused, reusable React components
+- Use TypeScript if beneficial
+- Include proper prop validation
+- Use Tailwind CSS for responsive design
+- Add accessibility features
+- Include error handling
+- Provide usage examples
 
-      component: `You are an expert React developer. Create a single, focused React component with these requirements:
+Generate production-ready components with comprehensive functionality.`,
 
-1. Functional component using hooks
-2. Proper TypeScript types if applicable
-3. Clean, readable code structure
-4. Responsive design with Tailwind CSS
-5. Proper prop validation
-6. Good accessibility practices
-7. Comprehensive error handling
+      fullstack: `${baseInstructions}
 
-Return only the component code with necessary imports.`,
+🎯 FULLSTACK REQUIREMENTS:
+- Frontend: React with Tailwind CSS
+- Backend: Node.js/Express with proper structure
+- Database: Include models/schemas
+- API: RESTful endpoints with validation
+- Authentication: Basic auth implementation
+- File structure: Separate frontend/backend folders
+- Documentation: README and API docs
 
-      fullstack: `You are a full-stack developer. Create both frontend and backend code as requested:
+Create a complete, deployable full-stack application.`,
 
-1. Frontend: Modern React with hooks and Tailwind CSS
-2. Backend: Node.js/Express with proper error handling
-3. Database: Include schema/model definitions
-4. API: RESTful endpoints with validation
-5. Security: Basic authentication and data validation
-6. Documentation: Clear comments and usage examples
+      general: `${baseInstructions}
 
-Separate files clearly with path comments.`,
+🎯 GENERAL REQUIREMENTS:
+- Write clean, efficient, modern code
+- Include proper error handling
+- Add comprehensive comments
+- Use current best practices
+- Ensure security considerations
+- Optimize for performance
+- Make it production-ready
 
-      general: `You are an expert software developer. Write clean, efficient code following best practices:
-
-1. Clear, readable code structure
-2. Proper error handling
-3. Good documentation/comments
-4. Modern language features
-5. Security considerations
-6. Performance optimization where relevant
-
-Provide complete, working code that can be immediately used.`
+Generate complete, working code following industry standards.`
     };
 
     return prompts[type] || prompts.general;
@@ -150,7 +187,6 @@ Provide complete, working code that can be immediately used.`
     }
 
     try {
-      // Simple health check - just verify we can make a request
       const response = await this.client.chat.completions.create({
         messages: [{ role: 'user', content: 'Hello' }],
         model: this.model,
