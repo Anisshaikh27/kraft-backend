@@ -1,52 +1,37 @@
+/**
+ * Project Routes
+ * CRUD operations for projects
+ */
+
 const express = require('express');
-const ProjectController = require('../controllers/projectController');
-
 const router = express.Router();
-const projectController = new ProjectController();
+const authMiddleware = require('../middleware/auth');
+const {
+  createProject,
+  listProjects,
+  getProject,
+  updateProject,
+  deleteProject,
+} = require('../controllers/projectController');
 
-// POST /api/projects
-router.post('/', async (req, res) => {
-  try {
-    await projectController.createProject(req, res);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// All routes require authentication
+router.use(authMiddleware);
 
-// GET /api/projects
-router.get('/', async (req, res) => {
-  try {
-    await projectController.listProjects(req, res);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// POST /api/projects - Create project
+router.post('/', createProject);
 
-// GET /api/projects/:id
-router.get('/:id', async (req, res) => {
-  try {
-    await projectController.getProject(req, res);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// GET /api/projects - List user's projects
+router.get('/', listProjects);
 
-// PUT /api/projects/:id
-router.put('/:id', async (req, res) => {
-  try {
-    await projectController.updateProject(req, res);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// GET /api/projects/:id - Get specific project
+router.get('/:id', getProject);
 
-// DELETE /api/projects/:id
-router.delete('/:id', async (req, res) => {
-  try {
-    await projectController.deleteProject(req, res);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// PUT /api/projects/:id - Update project
+router.put('/:id', updateProject);
+
+// DELETE /api/projects/:id - Delete project
+router.delete('/:id', deleteProject);
+
+module.exports = router;
 
 module.exports = router;

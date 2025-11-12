@@ -1,5 +1,7 @@
 const GroqService = require('../services/groqService');
 const GeminiService = require('../services/geminiService');
+const SandpackResponseProcessor = require('../services/sandpackResponseProcessor');
+const ReactTemplateValidator = require('../services/reactTemplateValidator');
 
 class AIController {
   constructor() {
@@ -37,20 +39,64 @@ class AIController {
         }
       }
 
-      const processedResponse = this.processAIResponse(response, usedProvider);
+      // Use Sandpack processor for React projects
+      const processedResponse = type === 'react' || type === 'sandpack'
+        ? this.processSandpackResponse(response, usedProvider)
+        : this.processAIResponse(response, usedProvider);
+
+      // Validate React template quality
+      const validationReport = type === 'react' || type === 'sandpack'
+        ? ReactTemplateValidator.generateReport(processedResponse.files)
+        : null;
 
       res.json({
         success: true,
         data: {
           ...processedResponse,
           model: response.model || 'unknown',
-          provider: usedProvider
+          provider: usedProvider,
+          type: type,
+          validation: validationReport
         }
       });
 
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
+  }
+
+  /**
+   * Process responses specifically for Sandpack compatibility
+   */
+  processSandpackResponse(response, provider) {
+    let content = '';
+
+    if (provider === 'groq') {
+      content = response.content || '';
+    } else if (provider === 'gemini') {
+      if (response.candidates && response.candidates[0]) {
+        content = response.candidates[0].content?.parts?.[0]?.text || '';
+      }
+    }
+
+    // Use the Sandpack processor to validate and fix the response
+    const files = SandpackResponseProcessor.processResponse(content, provider);
+
+    // Validate files meet React template requirements
+    const validation = ReactTemplateValidator.validate(files);
+
+    return {
+      content,
+      files: validation.fixedFiles || files,
+      explanation: content,
+      validation: {
+        isValid: validation.isValid,
+        score: validation.score,
+        errors: validation.errors,
+        warnings: validation.warnings,
+        recommendations: validation.recommendations
+      }
+    };
   }
 
   processAIResponse(response, provider) {

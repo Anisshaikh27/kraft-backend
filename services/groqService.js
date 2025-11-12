@@ -25,8 +25,15 @@ class GroqService {
 
     try {
       console.log('🚀 Making Groq API call...');
-      console.log('   Prompt:', prompt.substring(0, 100) + '...');
-      console.log('   Model:', this.model);
+      console.log('   Type:', type);
+      console.log('   Prompt length:', prompt.length);
+
+      // For react/sandpack, enhance the prompt
+      let enhancedPrompt = prompt;
+      if (type === 'react' || type === 'sandpack') {
+        const SandpackPromptBuilder = require('../utils/sandpackPromptBuilder');
+        enhancedPrompt = SandpackPromptBuilder.buildValidatedPrompt(prompt);
+      }
 
       const response = await this.client.chat.completions.create({
         messages: [
@@ -36,12 +43,12 @@ class GroqService {
           },
           {
             role: 'user',
-            content: prompt
+            content: enhancedPrompt
           }
         ],
         model: this.model,
         temperature: 0.1,
-        max_tokens: 4000,
+        max_tokens: 7000,
         stream: false
       });
 
@@ -53,8 +60,7 @@ class GroqService {
         content = response.choices[0].message?.content || '';
       }
 
-      console.log('📝 Extracted content length:', content.length);
-      console.log('📝 Content preview:', content.substring(0, 200) + '...');
+      console.log('📝 Response length:', content.length);
 
       // Return in expected format
       return {
@@ -73,6 +79,12 @@ class GroqService {
 
   // ENHANCED: Better system prompts with clear file structure requirements
   getEnhancedSystemPrompt(type) {
+    const sandpackPrompts = require('../prompts/sandpackPrompts');
+    
+    if (type === 'react' || type === 'sandpack') {
+      return sandpackPrompts.getSandpackReactPrompt();
+    }
+    
     const baseInstructions = `You are an expert full-stack developer. Follow these CRITICAL formatting rules:
 
 🚨 CRITICAL FILE FORMAT RULES:
