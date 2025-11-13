@@ -79,10 +79,10 @@ class GroqService {
 
   // ENHANCED: Better system prompts with clear file structure requirements
   getEnhancedSystemPrompt(type) {
-    const sandpackPrompts = require('../prompts/sandpackPrompts');
-    
+    // Use MASTER prompt for React projects - most powerful and complete
     if (type === 'react' || type === 'sandpack') {
-      return sandpackPrompts.getSandpackReactPrompt();
+      const masterPrompt = require('../prompts/masterPrompt');
+      return masterPrompt.getMasterSandpackPrompt();
     }
     
     const baseInstructions = `You are an expert full-stack developer. Follow these CRITICAL formatting rules:

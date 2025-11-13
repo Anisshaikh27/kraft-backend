@@ -3,7 +3,7 @@
  * Creates optimized prompts for generating React apps that work in Sandpack
  */
 
-const sandpackPrompts = require('./sandpackPrompts');
+const sandpackPrompts = require('../prompts/sandpackPrompts');
 
 class SandpackPromptBuilder {
   /**

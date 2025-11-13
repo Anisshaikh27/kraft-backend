@@ -28,13 +28,24 @@ class SandpackResponseProcessor {
   static extractFiles(content) {
     const files = [];
     
-    // Pattern 1: // filepath with ```
-    const pattern1 = /\/\/\s*(src\/[^\n]+\.(jsx?|tsx?|css|html|json|md))\s*\n```[\w]*\n([\s\S]*?)```/gi;
+    // Pattern 1: // filepath with ``` (supports root level files like package.json, public/*, src/*)
+    const pattern1 = /\/\/\s*(?:src\/|public\/|)([\w\.\/-]+\.(jsx?|tsx?|css|html|json|md))\s*\n```[\w]*\n([\s\S]*?)```/gi;
     let match;
 
     while ((match = pattern1.exec(content)) !== null) {
-      const filePath = match[1].trim();
+      let filePath = match[1].trim();
       const fileContent = match[3].trim();
+
+      // Ensure proper path prefix
+      if (!filePath.startsWith('/')) {
+        if (filePath === 'package.json' || filePath.startsWith('tailwind.')) {
+          filePath = '/' + filePath;
+        } else if (!filePath.startsWith('src/') && !filePath.startsWith('public/')) {
+          filePath = '/src/' + filePath;
+        } else {
+          filePath = '/' + filePath;
+        }
+      }
 
       if (fileContent && filePath && fileContent.length > 5) {
         files.push({
@@ -46,13 +57,24 @@ class SandpackResponseProcessor {
       }
     }
 
-    // Pattern 2: ** filepath ** with ```
+    // Pattern 2: ** filepath ** with ``` (supports all file types)
     if (files.length === 0) {
-      const pattern2 = /\*\*(src\/[^\*]+\.(jsx?|tsx?|css|html|json|md))\*\*\s*\n```[\w]*\n([\s\S]*?)```/gi;
+      const pattern2 = /\*\*(?:src\/|public\/|)?([\w\.\/-]+\.(jsx?|tsx?|css|html|json|md))\*\*\s*\n```[\w]*\n([\s\S]*?)```/gi;
 
       while ((match = pattern2.exec(content)) !== null) {
-        const filePath = match[1].trim();
+        let filePath = match[1].trim();
         const fileContent = match[3].trim();
+
+        // Ensure proper path prefix
+        if (!filePath.startsWith('/')) {
+          if (filePath === 'package.json' || filePath.startsWith('tailwind.')) {
+            filePath = '/' + filePath;
+          } else if (!filePath.startsWith('src/') && !filePath.startsWith('public/')) {
+            filePath = '/src/' + filePath;
+          } else {
+            filePath = '/' + filePath;
+          }
+        }
 
         if (fileContent && filePath && fileContent.length > 5) {
           files.push({
@@ -65,7 +87,7 @@ class SandpackResponseProcessor {
       }
     }
 
-    // Pattern 3: Generic code blocks
+    // Pattern 3: Generic code blocks with smart path detection
     if (files.length === 0) {
       const pattern3 = /```(jsx?|tsx?|css|html|json)\n([\s\S]*?)```/gi;
       let fileIndex = 1;
@@ -75,8 +97,9 @@ class SandpackResponseProcessor {
         const fileContent = match[2].trim();
 
         if (fileContent && fileContent.length > 5) {
+          const smartPath = this.generateSmartFilePath(fileContent, language, fileIndex);
           files.push({
-            path: this.generateSmartFilePath(fileContent, language, fileIndex),
+            path: smartPath,
             content: fileContent,
             language: this.getLanguageFromPath(fileContent),
             operation: 'create'
@@ -199,16 +222,26 @@ root.render(<App />);`;
   static generateSmartFilePath(content, language, index) {
     const lower = content.toLowerCase();
     
-    if (lower.includes('package.json') || language === 'json') return 'package.json';
-    if (lower.includes('<!doctype html') || language === 'html') return 'public/index.html';
-    if (content.includes('createRoot')) return 'src/index.js';
-    if (content.includes('export default function App') || 
-        content.includes('export default App')) return 'src/App.js';
-    if (lower.includes('tailwind')) return 'tailwind.config.js';
-    if (language === 'css') return 'src/index.css';
-    if (content.includes('function ') || content.includes('const ')) return `src/components/Component${index}.jsx`;
+    // Root level files
+    if (lower.includes('"name":') && lower.includes('"dependencies":')) return '/package.json';
+    if (lower.includes('<!doctype') || lower.includes('<html')) return '/public/index.html';
+    if (lower.includes('tailwind') && language === 'js') return '/tailwind.config.js';
     
-    return `src/file${index}.${language}`;
+    // Source files
+    if (content.includes('createRoot') || content.includes('ReactDOM')) return '/src/index.js';
+    if (content.includes('export default function App') || 
+        (content.includes('export default') && content.includes('return ('))) return '/src/App.js';
+    
+    // CSS files
+    if (language === 'css' && lower.includes('@tailwind')) return '/src/index.css';
+    if (language === 'css') return `/src/styles/style${index}.css`;
+    
+    // Components
+    if (content.includes('function ') || content.includes('const ') || content.includes('import')) {
+      return `/src/components/Component${index}.jsx`;
+    }
+    
+    return `/src/file${index}.${language}`;
   }
 
   /**
@@ -219,7 +252,7 @@ root.render(<App />);`;
 
     // Create package.json
     files.push({
-      path: 'package.json',
+      path: '/package.json',
       content: JSON.stringify({
         "name": "sandpack-app",
         "version": "1.0.0",
@@ -234,14 +267,14 @@ root.render(<App />);`;
 
     // Create HTML
     files.push({
-      path: 'public/index.html',
+      path: '/public/index.html',
       content: `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://cdn.tailwindcss.com"><\/script>
-    <title>App</title>
+    <title>React App</title>
   </head>
   <body>
     <div id="root"><\/div>
@@ -251,15 +284,49 @@ root.render(<App />);`;
       operation: 'create'
     });
 
+    // Create index.css
+    files.push({
+      path: '/src/index.css',
+      content: `@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+}`,
+      language: 'css',
+      operation: 'create'
+    });
+
     // Create index.js
     files.push({
-      path: 'src/index.js',
+      path: '/src/index.js',
       content: `import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import './index.css';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App />);`,
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);`,
       language: 'javascript',
       operation: 'create'
     });
@@ -267,7 +334,7 @@ root.render(<App />);`,
     // Create App.js from content
     const appContent = this.sanitizeCodeContent(content);
     files.push({
-      path: 'src/App.js',
+      path: '/src/App.js',
       content: appContent,
       language: 'javascript',
       operation: 'create'
@@ -313,14 +380,23 @@ export default function App() {
    * Ensure essential files exist
    */
   static ensureEssentialFiles(files) {
-    const hasPackageJson = files.some(f => f.path === 'package.json');
-    const hasHtml = files.some(f => f.path === 'public/index.html');
-    const hasIndex = files.some(f => f.path === 'src/index.js' || f.path === 'src/index.jsx');
-    const hasApp = files.some(f => f.path === 'src/App.js' || f.path === 'src/App.jsx');
+    const hasPackageJson = files.some(f => f.path === '/package.json' || f.path === 'package.json');
+    const hasHtml = files.some(f => f.path === '/public/index.html' || f.path === 'public/index.html');
+    const hasIndex = files.some(f => f.path === '/src/index.js' || f.path === 'src/index.js' || 
+                                      f.path === '/src/index.jsx' || f.path === 'src/index.jsx');
+    const hasApp = files.some(f => f.path === '/src/App.js' || f.path === 'src/App.js' || 
+                                   f.path === '/src/App.jsx' || f.path === 'src/App.jsx');
+    const hasIndexCss = files.some(f => f.path === '/src/index.css' || f.path === 'src/index.css');
+
+    // Normalize paths to start with /
+    const normalizedFiles = files.map(f => ({
+      ...f,
+      path: f.path.startsWith('/') ? f.path : '/' + f.path
+    }));
 
     if (!hasPackageJson) {
-      files.push({
-        path: 'package.json',
+      normalizedFiles.push({
+        path: '/package.json',
         content: JSON.stringify({
           "name": "sandpack-app",
           "version": "1.0.0",
@@ -335,15 +411,15 @@ export default function App() {
     }
 
     if (!hasHtml) {
-      files.push({
-        path: 'public/index.html',
+      normalizedFiles.push({
+        path: '/public/index.html',
         content: `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://cdn.tailwindcss.com"><\/script>
-    <title>App</title>
+    <title>React App</title>
   </head>
   <body>
     <div id="root"><\/div>
@@ -355,30 +431,35 @@ export default function App() {
     }
 
     if (!hasIndex) {
-      files.push({
-        path: 'src/index.js',
+      normalizedFiles.push({
+        path: '/src/index.js',
         content: `import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import './index.css';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App />);`,
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);`,
         language: 'javascript',
         operation: 'create'
       });
     }
 
     if (!hasApp) {
-      files.push({
-        path: 'src/App.js',
+      normalizedFiles.push({
+        path: '/src/App.js',
         content: `import React from 'react';
 
 export default function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-8">
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">Welcome to React</h1>
-        <p className="text-lg text-gray-700">Your app is ready!</p>
+        <h1 className="text-4xl font-bold text-gray-900 mb-4">Welcome to Your React App</h1>
+        <p className="text-lg text-gray-700">Start editing to see your app live!</p>
       </div>
     </div>
   );
@@ -388,7 +469,37 @@ export default function App() {
       });
     }
 
-    return files;
+    if (!hasIndexCss) {
+      normalizedFiles.push({
+        path: '/src/index.css',
+        content: `@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+}`,
+        language: 'css',
+        operation: 'create'
+      });
+    }
+
+    return normalizedFiles;
   }
 
   /**
