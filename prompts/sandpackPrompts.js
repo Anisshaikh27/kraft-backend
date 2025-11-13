@@ -34,7 +34,8 @@ You are an expert React developer creating applications for Sandpack (a browser-
      "version": "1.0.0",
      "dependencies": {
        "react": "^18.2.0",
-       "react-dom": "^18.2.0"
+       "react-dom": "^18.2.0",
+       "react-router-dom" : ""
      }
    }
    ✅ Complete minimal structure - NO truncation
