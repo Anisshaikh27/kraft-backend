@@ -1,5 +1,89 @@
 // React-specific prompts and templates for better code generation
 
+const getReactFullProjectPrompt = () => `
+When creating COMPLETE React projects (not just components), you MUST generate:
+
+🚨 MANDATORY BASE FILES (ALWAYS generate these first):
+
+1. // package.json
+   \`\`\`json
+   {
+     "name": "react-app",
+     "version": "1.0.0",
+     "dependencies": {
+       "react": "^18.2.0",
+       "react-dom": "^18.2.0"
+     }
+   }
+   \`\`\`
+
+2. // public/index.html
+   \`\`\`html
+   <!DOCTYPE html>
+   <html lang="en">
+     <head>
+       <meta charset="UTF-8">
+       <meta name="viewport" content="width=device-width, initial-scale=1.0">
+       <script src="https://cdn.tailwindcss.com"></script>
+       <title>React App</title>
+     </head>
+     <body>
+       <div id="root"></div>
+     </body>
+   </html>
+   \`\`\`
+
+3. // src/index.css
+   \`\`\`css
+   @tailwind base;
+   @tailwind components;
+   @tailwind utilities;
+
+   * {
+     margin: 0;
+     padding: 0;
+     box-sizing: border-box;
+   }
+
+   body {
+     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+       'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+       sans-serif;
+     -webkit-font-smoothing: antialiased;
+     -moz-osx-font-smoothing: grayscale;
+   }
+
+   html, body, #root {
+     height: 100%;
+     width: 100%;
+   }
+   \`\`\`
+
+4. // src/index.js
+   \`\`\`jsx
+   import React from 'react';
+   import ReactDOM from 'react-dom/client';
+   import App from './App';
+   import './index.css';
+
+   const root = ReactDOM.createRoot(document.getElementById('root'));
+   root.render(
+     <React.StrictMode>
+       <App />
+     </React.StrictMode>
+   );
+   \`\`\`
+
+5. // src/App.js
+   \`\`\`jsx
+   [Complete App component with JSX and Tailwind styling]
+   \`\`\`
+
+THEN add additional components as needed.
+
+CRITICAL: ALWAYS provide these 5 files BEFORE any additional components.
+`;
+
 const getReactComponentPrompt = () => `
 When creating React components, follow these patterns:
 
@@ -408,6 +492,7 @@ describe('useCustomHook', () => {
 `;
 
 module.exports = {
+  getReactFullProjectPrompt,
   getReactComponentPrompt,
   getReactHooksPrompt,
   getReactContextPrompt,

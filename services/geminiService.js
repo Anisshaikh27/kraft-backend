@@ -39,7 +39,73 @@ class GeminiService {
     this.requestCount++;
   }
 
-  async generateCode(systemPrompt, userPrompt, context = {}) {
+  async generateCode(prompt, type = 'react', context = {}) {
+    if (!this.client) {
+      throw new Error('Gemini service not available. API key not configured.');
+    }
+
+    this.checkRateLimit();
+
+    try {
+      // For react/sandpack, use master prompt
+      let enhancedPrompt = prompt;
+      if (type === 'react' || type === 'sandpack') {
+        const masterPrompt = require('../prompts/masterPrompt');
+        const systemPromptTemplate = masterPrompt.getMasterSandpackPrompt();
+        enhancedPrompt = `${systemPromptTemplate}\n\nUser Request: ${prompt}`;
+      }
+
+      const model = this.client.getGenerativeModel({ 
+        model: this.model,
+        generationConfig: {
+          temperature: this.temperature,
+          maxOutputTokens: this.maxTokens,
+          topP: 0.8,
+          topK: 10
+        }
+      });
+
+      const result = await model.generateContent(enhancedPrompt);
+      const response = await result.response;
+      const text = response.text();
+
+      if (!text) {
+        throw new Error('Empty response from Gemini');
+      }
+
+      return {
+        success: true,
+        content: text,
+        model: this.model,
+        provider: 'gemini',
+        usage: {
+          promptTokens: response.usageMetadata?.promptTokenCount || 0,
+          completionTokens: response.usageMetadata?.candidatesTokenCount || 0,
+          totalTokens: response.usageMetadata?.totalTokenCount || 0
+        }
+      };
+
+    } catch (error) {
+      console.error('Gemini API error:', error.message);
+
+      // Handle specific Gemini errors
+      if (error.message?.includes('quota') || error.message?.includes('limit')) {
+        throw new Error('Gemini rate limit exceeded. Please try again later.');
+      }
+      
+      if (error.message?.includes('API key') || error.status === 403) {
+        throw new Error('Gemini API authentication failed. Please check your API key.');
+      }
+
+      if (error.status >= 500) {
+        throw new Error('Gemini service temporarily unavailable.');
+      }
+
+      throw new Error(`Gemini API error: ${error.message}`);
+    }
+  }
+
+  async generateCodeOld(systemPrompt, userPrompt, context = {}) {
     if (!this.client) {
       throw new Error('Gemini service not available. API key not configured.');
     }
